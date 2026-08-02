@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Fusionlancers Grafusion brand palette -->
+    <color name="fusion_navy">#0B1739</color>
+    <color name="fusion_blue">#142B5F</color>
+    <color name="energy_orange">#FF8A00</color>
+    <color name="data_purple">#7C3AED</color>
+    <color name="white">#FFFFFF</color>
+
+    <!-- Splash background -->
+    <color name="splash_background">#0B1739</color>
+</resources>

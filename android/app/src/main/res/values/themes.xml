@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launch theme for SplashActivity: window background matches the splash gradient
+         so there is no navy flash before setContentView renders. -->
+    <style name="Theme.Grafusion.Launch" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/fusion_navy</item>
+        <item name="android:navigationBarColor">@color/fusion_navy</item>
+        <item name="android:windowBackground">@drawable/splash_gradient</item>
+    </style>
+
+    <!-- Post-splash app theme (Compose owns actual styling) -->
+    <style name="Theme.Grafusion" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@color/fusion_navy</item>
+        <item name="android:navigationBarColor">@color/fusion_navy</item>
+        <item name="android:windowBackground">@color/fusion_navy</item>
+    </style>
+</resources>

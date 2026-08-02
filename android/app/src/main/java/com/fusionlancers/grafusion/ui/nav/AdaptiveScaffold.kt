@@ -1,0 +1,126 @@
+package com.fusionlancers.grafusion.ui.nav
+
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.windowsizeclass.WindowSizeClass
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import androidx.navigation.NavHostController
+import androidx.navigation.NavType
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.navigation.navArgument
+import com.fusionlancers.grafusion.data.AppContainer
+import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
+import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
+import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
+import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import java.net.URLDecoder
+import java.net.URLEncoder
+
+@Composable
+fun AdaptiveScaffold(
+    navController: NavHostController,
+    windowSizeClass: WindowSizeClass,
+    container: AppContainer,
+    useNavRail: Boolean,
+) {
+    val current by navController.currentBackStackEntryAsState()
+    val currentRoute = current?.destination?.route
+
+    if (useNavRail) {
+        Row(Modifier.fillMaxSize()) {
+            NavigationRail {
+                TopDest.entries.forEach { dest ->
+                    NavigationRailItem(
+                        selected = currentRoute == dest.route,
+                        onClick = { navController.navigateSingleTop(dest.route) },
+                        icon = { Icon(dest.icon, contentDescription = dest.label) },
+                        label = { Text(dest.label) },
+                    )
+                }
+            }
+            AppNavHost(navController, container, Modifier.fillMaxSize())
+        }
+    } else {
+        Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    TopDest.entries.forEach { dest ->
+                        NavigationBarItem(
+                            selected = currentRoute == dest.route,
+                            onClick = { navController.navigateSingleTop(dest.route) },
+                            icon = { Icon(dest.icon, contentDescription = dest.label) },
+                            label = { Text(dest.label) },
+                        )
+                    }
+                }
+            }
+        ) { padding ->
+            AppNavHost(navController, container, Modifier.padding(padding))
+        }
+    }
+}
+
+@Composable
+private fun AppNavHost(
+    navController: NavHostController,
+    container: AppContainer,
+    modifier: Modifier = Modifier,
+) {
+    NavHost(
+        navController = navController,
+        startDestination = TopDest.Dashboards.route,
+        modifier = modifier,
+    ) {
+        composable(TopDest.Dashboards.route) {
+            DashboardListScreen(
+                container = container,
+                onOpenDashboard = { uid, title ->
+                    val safeTitle = URLEncoder.encode(title, "UTF-8")
+                    navController.navigate("dashboard/$uid?title=$safeTitle")
+                },
+            )
+        }
+        composable(
+            route = "dashboard/{uid}?title={title}",
+            arguments = listOf(
+                navArgument("uid") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            val uid = entry.arguments?.getString("uid").orEmpty()
+            val title = URLDecoder.decode(entry.arguments?.getString("title").orEmpty(), "UTF-8")
+            DashboardDetailScreen(
+                container = container,
+                uid = uid,
+                title = title.ifBlank { "Dashboard" },
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(TopDest.Alerts.route) {
+            AlertsScreen(container = container)
+        }
+        composable(TopDest.Accounts.route) {
+            AccountsScreen(container = container)
+        }
+    }
+}
+
+private fun NavHostController.navigateSingleTop(route: String) {
+    navigate(route) {
+        popUpTo(graph.startDestinationId) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
