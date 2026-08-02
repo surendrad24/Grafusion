@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Grafusion</string>
+    <string name="app_tagline">Mobile Dashboards</string>
+    <string name="app_subtitle">An open-source mobile and tablet client for Grafana, built by Fusionlancers Technologies.</string>
+    <string name="company_name">Fusionlancers Technologies Pvt. Ltd.</string>
+    <string name="company_url">https://fusionlancers.com/</string>
+    <string name="author_name">Surendra Donthamsetti</string>
+    <string name="author_url">https://surendradonthamsetti.com/</string>
+
+    <string name="nav_dashboards">Dashboards</string>
+    <string name="nav_alerts">Alerts</string>
+    <string name="nav_accounts">Accounts</string>
+    <string name="login_url_hint">https://grafana.example.com</string>
+    <string name="login_username_hint">Username</string>
+    <string name="login_password_hint">Password</string>
+    <string name="login_button">Sign in</string>
+</resources>
