@@ -15,4 +15,6 @@ data class Dashboard(
     val folderTitle: String? = null,
     val tags: List<String> = emptyList(),
     val cachedOffline: Boolean = false,
+    val dashboardId: Long? = null,
+    val isStarred: Boolean = false,
 )

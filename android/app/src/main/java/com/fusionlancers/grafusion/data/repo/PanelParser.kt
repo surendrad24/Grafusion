@@ -59,6 +59,7 @@ internal object PanelParser {
             gridH = gp?.get("h")?.jsonPrimitive?.intOrNullSafe() ?: 8,
             unit = unit,
             decimals = decimals,
+            options = obj["options"] as? JsonObject,
         )
     }
 
@@ -83,14 +84,17 @@ internal object PanelParser {
                 val fieldNames = mutableListOf<String>()
                 val fieldTypes = mutableListOf<String>()
                 val columns = mutableListOf<List<Any?>>()
+                val fieldLabels = mutableListOf<Map<String, String>>()
                 for (i in 0 until values.size) {
                     val meta = schemaFields?.getOrNull(i)?.jsonObject
                     fieldNames += meta?.get("name")?.jsonPrimitive?.contentOrNullSafe() ?: "field$i"
                     val ftype = meta?.get("type")?.jsonPrimitive?.contentOrNullSafe() ?: "unknown"
                     fieldTypes += ftype
                     columns += values[i].jsonArray.map { p -> primitiveToAny(p, ftype) }
+                    val labelsObj = meta?.get("labels") as? JsonObject
+                    fieldLabels += labelsObj?.mapValues { (_, v) -> (v as? JsonPrimitive)?.contentOrNullSafe().orEmpty() } ?: emptyMap()
                 }
-                rawFrames += RawFrame(fieldNames, fieldTypes, columns)
+                rawFrames += RawFrame(fieldNames, fieldTypes, columns, fieldLabels)
 
                 // Build numeric Series when the frame is a time + numeric series shape.
                 if (values.size >= 2) {

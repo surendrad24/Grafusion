@@ -17,6 +17,9 @@ interface DashboardDao {
     @Query("UPDATE dashboards SET detailJson = :json, updatedAt = :ts WHERE accountId = :accountId AND uid = :uid")
     suspend fun updateDetail(accountId: Long, uid: String, json: String, ts: Long = System.currentTimeMillis())
 
+    @Query("UPDATE dashboards SET isStarred = :starred WHERE accountId = :accountId AND uid = :uid")
+    suspend fun updateStar(accountId: Long, uid: String, starred: Boolean)
+
     @Query("DELETE FROM dashboards WHERE accountId = :accountId")
     suspend fun clearForAccount(accountId: Long)
 }

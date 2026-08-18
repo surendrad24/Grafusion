@@ -2,6 +2,7 @@ package com.fusionlancers.grafusion.ui.dashboards
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -206,6 +207,7 @@ fun DashboardDetailScreen(
                                             saveMessage = "Layout saved"
                                             editMode = false
                                             workingOrder.clear()
+                                            panelData.clear()
                                             runCatching { container.dashboardRepository.panelsFor(uid) }
                                                 .onSuccess { panels = it }
                                         }
@@ -330,7 +332,7 @@ private fun groupIntoRows(all: List<Panel>, useGrid: Boolean): List<PanelBand> {
         if (current.isEmpty()) {
             current += p
             currentY = p.gridY
-        } else if (p.gridY == currentY && current.sumOf { it.gridW } + p.gridW <= 24) {
+        } else if (kotlin.math.abs(p.gridY - currentY) <= 2 && current.sumOf { it.gridW } + p.gridW <= 24) {
             current += p
         } else {
             bands += PanelBand(
@@ -354,9 +356,11 @@ private fun groupIntoRows(all: List<Panel>, useGrid: Boolean): List<PanelBand> {
 
 @Composable
 private fun PanelRow(band: PanelBand, panelData: androidx.compose.runtime.snapshots.SnapshotStateMap<Long, PanelData?>) {
+    // Let the panel body dictate height — Grafana gridH assumes desktop pixel grid that dwarfs mobile cards.
     Row(
-        modifier = Modifier.fillMaxWidth().heightIn(min = band.heightDp.dp),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.Top,
     ) {
         band.panels.forEach { panel ->
             Box(Modifier.weight(panel.gridW.toFloat().coerceAtLeast(1f)).fillMaxWidth()) {
@@ -557,9 +561,12 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "stat", "gauge", "bargauge" -> StatOrGaugePanel(panel, data, cardWidth)
         "table" -> TablePanel(data)
         "barchart" -> BarChartPanel(data)
+        "piechart" -> PieChartPanel(data)
+        "heatmap" -> HeatmapPanel(data)
+        "state-timeline", "status-history" -> StateTimelinePanel(data)
         "logs" -> LogsPanel(data)
-        "text" -> UnsupportedPanel(panel.type, "Text/markdown panels are not rendered natively yet.")
-        "geomap", "worldmap-panel" -> UnsupportedPanel(panel.type, "Geo maps are not rendered natively yet.")
+        "text" -> TextPanel(panel)
+        "geomap", "worldmap-panel" -> GeomapPanel(data)
         else -> UnsupportedPanel(panel.type, null)
     }
 }
@@ -625,20 +632,20 @@ private fun TimeseriesPanel(data: PanelData) {
 
 @Composable
 private fun BarChartPanel(data: PanelData) {
-    val frame = data.frames.firstOrNull() ?: return
-    val valueColIdx = frame.fieldTypes.indexOfFirst { it == "number" }
-    if (valueColIdx < 0) { PanelNoData(); return }
-    val labelColIdx = frame.fieldTypes.indexOfFirst { it == "string" }.takeIf { it >= 0 }
-    val values = frame.columns[valueColIdx].mapNotNull { (it as? Number)?.toDouble() }
-    if (values.isEmpty()) { PanelNoData(); return }
+    // Two shapes:
+    // A) Prometheus format=table+instant: one frame per label combo, label in fieldLabels, value is last number.
+    // B) Single frame with a label column (string) + value column (number).
+    val labeledPairs = remember(data) { extractBarPairs(data) }
+    if (labeledPairs.isEmpty()) { PanelNoData(); return }
+    val values = labeledPairs.map { it.second }
+    val labels = labeledPairs.map { it.first }
     val producer = remember { CartesianChartModelProducer() }
     LaunchedEffect(data) {
         producer.runTransaction {
             columnSeries { series(values) }
         }
     }
-    val labels = labelColIdx?.let { idx -> frame.columns[idx].map { it?.toString().orEmpty() } } ?: emptyList()
-    Box(Modifier.fillMaxWidth().height(200.dp)) {
+    Box(Modifier.fillMaxWidth().height(220.dp)) {
         CartesianChartHost(
             chart = rememberCartesianChart(
                 rememberColumnCartesianLayer(),
@@ -655,14 +662,65 @@ private fun BarChartPanel(data: PanelData) {
     }
 }
 
+private fun reduceStat(values: List<Double>, calc: String): Double? {
+    if (values.isEmpty()) return null
+    return when (calc) {
+        "last", "lastNotNull" -> values.last()
+        "first", "firstNotNull" -> values.first()
+        "mean" -> values.average()
+        "min" -> values.min()
+        "max" -> values.max()
+        "sum", "total" -> values.sum()
+        "count" -> values.size.toDouble()
+        "range" -> values.max() - values.min()
+        else -> values.last()
+    }
+}
+
+/** Returns (label, value) pairs sorted by descending value, capped at 20. */
+private fun extractBarPairs(data: PanelData): List<Pair<String, Double>> {
+    val pairs = mutableListOf<Pair<String, Double>>()
+    val preferredLabelKeys = listOf("country", "city", "type", "scenario", "name", "instance", "job", "service")
+    for (frame in data.frames) {
+        val numIdx = frame.fieldTypes.indexOfFirst { it == "number" }
+        if (numIdx < 0) continue
+        val labels = frame.fieldLabels.getOrNull(numIdx).orEmpty()
+        if (labels.isNotEmpty()) {
+            // Case A: one frame per label combo (Prometheus).
+            val labelKey = preferredLabelKeys.firstOrNull { labels[it]?.isNotBlank() == true }
+                ?: labels.keys.firstOrNull { it != "__name__" }
+            val label = labelKey?.let { labels[it] }.orEmpty()
+            val v = (frame.columns[numIdx].lastOrNull { it != null } as? Number)?.toDouble() ?: continue
+            if (label.isNotBlank()) pairs += label to v
+            continue
+        }
+        // Case B: label column + value column in one frame.
+        val strIdx = frame.fieldTypes.indexOfFirst { it == "string" }
+        if (strIdx >= 0) {
+            for (r in 0 until frame.rowCount) {
+                val lbl = frame.columns[strIdx].getOrNull(r)?.toString().orEmpty()
+                val v = (frame.columns[numIdx].getOrNull(r) as? Number)?.toDouble() ?: continue
+                if (lbl.isNotBlank()) pairs += lbl to v
+            }
+        }
+    }
+    return pairs.sortedByDescending { it.second }.take(20)
+}
+
 @Composable
 private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
-    val latest = data.series.firstOrNull()?.values?.lastOrNull { it != null }
-        ?: data.frames.firstOrNull()?.let { frame ->
-            frame.columns.getOrNull(frame.fieldTypes.indexOfFirst { it == "number" })
-                ?.lastOrNull { it != null }
-                ?.let { (it as? Number)?.toDouble() }
-        }
+    val calc = remember(panel.options) {
+        val reduce = panel.options?.get("reduceOptions") as? kotlinx.serialization.json.JsonObject
+        val calcs = reduce?.get("calcs") as? kotlinx.serialization.json.JsonArray
+        (calcs?.firstOrNull() as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "lastNotNull"
+    }
+    val seriesValues = data.series.firstOrNull()?.values?.filterNotNull().orEmpty()
+    val frameValues = data.frames.firstOrNull()?.let { frame ->
+        frame.columns.getOrNull(frame.fieldTypes.indexOfFirst { it == "number" })
+            ?.mapNotNull { (it as? Number)?.toDouble() }
+    }.orEmpty()
+    val values = if (seriesValues.isNotEmpty()) seriesValues else frameValues
+    val latest = reduceStat(values, calc)
     val display = when {
         latest == null -> "—"
         else -> formatValue(latest, panel.unit, panel.decimals)
@@ -761,6 +819,164 @@ private fun LogsPanel(data: PanelData) {
             }
         }
     }
+}
+
+@Composable
+private fun HeatmapPanel(data: PanelData) {
+    // Grafana heatmap frames are one column per Y-bucket, with a time column and numeric bucket cols.
+    val frame = data.frames.firstOrNull() ?: run { PanelNoData(); return }
+    val timeIdx = frame.fieldTypes.indexOfFirst { it == "time" }
+    val bucketIdxs = frame.fieldTypes.mapIndexedNotNull { i, t -> if (t == "number" && i != timeIdx) i else null }
+    if (timeIdx < 0 || bucketIdxs.isEmpty() || frame.rowCount == 0) { PanelNoData(); return }
+    val cells = bucketIdxs.map { bi ->
+        frame.columns[bi].map { (it as? Number)?.toDouble() ?: 0.0 }
+    }
+    val maxVal = cells.flatten().maxOrNull()?.takeIf { it > 0 } ?: run { PanelNoData(); return }
+    val cols = frame.rowCount
+    val rows = bucketIdxs.size
+    Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+        val cw = size.width / cols
+        val ch = size.height / rows
+        for (r in 0 until rows) {
+            val rowVals = cells[r]
+            for (c in 0 until cols) {
+                val v = rowVals.getOrNull(c) ?: 0.0
+                if (v <= 0) continue
+                val t = (v / maxVal).toFloat().coerceIn(0f, 1f)
+                val color = Color(
+                    red = 1f,
+                    green = (1f - t * 0.9f).coerceIn(0f, 1f),
+                    blue = (0.25f * (1f - t)).coerceIn(0f, 1f),
+                    alpha = (0.35f + 0.55f * t).coerceIn(0f, 1f),
+                )
+                drawRect(
+                    color = color,
+                    topLeft = androidx.compose.ui.geometry.Offset(c * cw, (rows - 1 - r) * ch),
+                    size = androidx.compose.ui.geometry.Size(cw + 0.5f, ch + 0.5f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StateTimelinePanel(data: PanelData) {
+    // Draw one row per numeric/string series over time; color-code discrete state changes.
+    val frame = data.frames.firstOrNull() ?: run { PanelNoData(); return }
+    val timeIdx = frame.fieldTypes.indexOfFirst { it == "time" }
+    if (timeIdx < 0 || frame.rowCount == 0) { PanelNoData(); return }
+    val stateIdxs = frame.fieldTypes.mapIndexedNotNull { i, t -> if (i != timeIdx && (t == "number" || t == "string" || t == "boolean")) i else null }
+    if (stateIdxs.isEmpty()) { PanelNoData(); return }
+    val times = frame.columns[timeIdx].mapNotNull { (it as? Number)?.toLong() }
+    if (times.size < 2) { PanelNoData(); return }
+    val tMin = times.first().toDouble(); val tMax = times.last().toDouble()
+    val span = (tMax - tMin).takeIf { it > 0 } ?: run { PanelNoData(); return }
+    val palette = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22D3EE))
+    val rowH = 24.dp
+    Column(Modifier.fillMaxWidth()) {
+        stateIdxs.forEach { idx ->
+            val name = frame.fieldNames.getOrNull(idx).orEmpty()
+            val col = frame.columns[idx]
+            Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Canvas(Modifier.fillMaxWidth().height(rowH)) {
+                var runStart = 0
+                for (i in 1..times.size) {
+                    val curr = col.getOrNull(i.coerceAtMost(col.size - 1))
+                    val prev = col.getOrNull(runStart)
+                    val boundary = i == times.size || curr != prev
+                    if (boundary) {
+                        val x0 = ((times[runStart].toDouble() - tMin) / span * size.width).toFloat()
+                        val x1 = ((times[(i - 1).coerceIn(0, times.size - 1)].toDouble() - tMin) / span * size.width).toFloat()
+                        val colorIdx = kotlin.math.abs(prev?.hashCode() ?: 0) % palette.size
+                        val color = if (prev == null) Color.Transparent else palette[colorIdx]
+                        drawRect(
+                            color = color,
+                            topLeft = androidx.compose.ui.geometry.Offset(x0, 0f),
+                            size = androidx.compose.ui.geometry.Size((x1 - x0).coerceAtLeast(1f), size.height),
+                        )
+                        runStart = i
+                    }
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
+private fun PieChartPanel(data: PanelData) {
+    val pairs = remember(data) { extractBarPairs(data) }
+    if (pairs.isEmpty()) { PanelNoData(); return }
+    val slices = pairs.take(8)
+    val total = slices.sumOf { it.second }.takeIf { it > 0.0 } ?: run { PanelNoData(); return }
+    val palette = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE), Color(0xFFEF4444))
+    Row(Modifier.fillMaxWidth().height(220.dp), verticalAlignment = Alignment.CenterVertically) {
+        Canvas(Modifier.size(180.dp).padding(16.dp)) {
+            var start = -90f
+            slices.forEachIndexed { idx, (_, v) ->
+                val sweep = (v / total * 360.0).toFloat()
+                drawArc(
+                    color = palette[idx % palette.size],
+                    startAngle = start,
+                    sweepAngle = sweep,
+                    useCenter = true,
+                )
+                start += sweep
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.fillMaxWidth()) {
+            slices.forEachIndexed { idx, (label, v) ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
+                    Box(Modifier.size(10.dp).background(palette[idx % palette.size], RoundedCornerShape(2.dp)))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "$label · ${"%.0f%%".format(v / total * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TextPanel(panel: Panel) {
+    val options = panel.options
+    val content = options?.get("content")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()
+    val mode = options?.get("mode")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()
+    if (content.isBlank()) { PanelNoData(); return }
+    val rendered = remember(content, mode) { renderTextPanel(content, mode) }
+    Text(
+        rendered,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+    )
+}
+
+/** Best-effort strip of markdown/html to plain text — mobile card is too narrow for real rendering. */
+private fun renderTextPanel(content: String, mode: String): String {
+    var s = content
+    if (mode.equals("html", true)) {
+        s = s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+            .replace(Regex("</p\\s*>", RegexOption.IGNORE_CASE), "\n\n")
+            .replace(Regex("<[^>]+>"), "")
+            .replace("&nbsp;", " ")
+            .replace("&amp;", "&")
+            .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+    } else {
+        // Markdown: keep bullets and headers as plain text.
+        s = s.replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("\\*(.+?)\\*"), "$1")
+            .replace(Regex("`([^`]+)`"), "$1")
+            .replace(Regex("\\[(.+?)]\\(.+?\\)"), "$1")
+    }
+    return s.trim()
 }
 
 @Composable

@@ -40,6 +40,8 @@ class DashboardRepository(
                         folderTitle = it.folderTitle,
                         tags = if (it.tags.isBlank()) emptyList() else it.tags.split(","),
                         cachedOffline = it.detailJson != null,
+                        dashboardId = it.dashboardId,
+                        isStarred = it.isStarred,
                     )
                 }
             }
@@ -59,9 +61,21 @@ class DashboardRepository(
                 folderTitle = it.folderTitle,
                 folderUid = it.folderUid,
                 tags = it.tags.joinToString(","),
+                dashboardId = it.id,
+                isStarred = it.isStarred,
             )
         }
         dashboardDao.upsertAll(mapped)
+    }
+
+    /** Toggle the starred flag on Grafana; optimistically update the local cache. */
+    suspend fun toggleStar(uid: String, dashboardId: Long, newValue: Boolean): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = if (newValue) api.starDashboard(auth, dashboardId) else api.unstarDashboard(auth, dashboardId)
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+        dashboardDao.updateStar(entity.id, uid, newValue)
     }
 
     /** Fetch and parse a dashboard's panel list. */
@@ -185,10 +199,14 @@ class DashboardRepository(
     private fun refIdFor(idx: Int): String = ('A' + idx).toString()
 
     private fun mergeTarget(target: JsonObject, panel: Panel, refId: String): JsonElement = buildJsonObject {
-        // Copy the target's own fields (expr, format, legendFormat, hide, etc.).
+        // Copy the target's own fields (expr, format, legendFormat, instant, range, hide, etc.).
         target.forEach { (k, v) -> put(k, v) }
         put("refId", refId)
-        put("range", JsonPrimitive(true))
+        // Only default range=true when the target didn't specify range/instant.
+        // Grafana's Prometheus DS uses instant=true for gauges/tables; overriding it breaks geomaps + label queries.
+        if (target["range"] == null && target["instant"] == null) {
+            put("range", JsonPrimitive(true))
+        }
         put("intervalMs", JsonPrimitive(15000))
         put("maxDataPoints", JsonPrimitive(500))
         // Prefer target's own datasource; fall back to the panel-level datasource.

@@ -16,6 +16,7 @@ data class Panel(
     val gridH: Int,
     val unit: String?,
     val decimals: Int?,
+    val options: JsonObject? = null,
 )
 
 /** One time-series returned by /api/ds/query — timestamps aligned with values. */
@@ -31,11 +32,14 @@ data class PanelData(
     val error: String? = null,
 )
 
-/** Raw DataFrame preserving all columns (numeric + string) for tables and logs. */
+/** Raw DataFrame preserving all columns (numeric + string) for tables and logs.
+ *  [fieldLabels] captures per-field label maps (Prometheus attaches labels like {city, country, latitude, longitude}
+ *  to a metric value field rather than emitting them as columns). Empty maps for non-Prometheus sources. */
 data class RawFrame(
     val fieldNames: List<String>,
     val fieldTypes: List<String>,
     val columns: List<List<Any?>>,
+    val fieldLabels: List<Map<String, String>> = emptyList(),
 ) {
     val rowCount: Int get() = columns.firstOrNull()?.size ?: 0
 }

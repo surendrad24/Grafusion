@@ -3,6 +3,7 @@ package com.fusionlancers.grafusion.data.api
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
@@ -47,6 +48,18 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
         @Body body: kotlinx.serialization.json.JsonObject,
     ): SaveDashboardResponse
+
+    @POST("api/user/stars/dashboard/{id}")
+    suspend fun starDashboard(
+        @Header("Authorization") auth: String,
+        @Path("id") id: Long,
+    ): retrofit2.Response<Unit>
+
+    @DELETE("api/user/stars/dashboard/{id}")
+    suspend fun unstarDashboard(
+        @Header("Authorization") auth: String,
+        @Path("id") id: Long,
+    ): retrofit2.Response<Unit>
 }
 
 @Serializable
@@ -89,6 +102,7 @@ data class DashboardSummary(
     @SerialName("folderTitle") val folderTitle: String? = null,
     @SerialName("folderUid") val folderUid: String? = null,
     val tags: List<String> = emptyList(),
+    val isStarred: Boolean = false,
 )
 
 @Serializable
