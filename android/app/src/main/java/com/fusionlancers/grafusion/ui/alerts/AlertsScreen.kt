@@ -18,10 +18,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.NotificationsPaused
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Card
@@ -29,8 +31,15 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -72,6 +81,9 @@ fun AlertsScreen(container: AppContainer) {
     var refreshing by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf<AlertFilter>(AlertFilter.All) }
+    var selected by remember { mutableStateOf<Alert?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     fun reload() {
         scope.launch {
@@ -143,18 +155,107 @@ fun AlertsScreen(container: AppContainer) {
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    items(filtered, key = { it.fingerprint }) { AlertCard(it) }
+                    items(filtered, key = { it.fingerprint }) { alert ->
+                        AlertCard(alert, onClick = { selected = alert })
+                    }
                 }
             }
+        }
+    }
+
+    SnackbarHost(hostState = snackbar)
+
+    selected?.let { alert ->
+        ModalBottomSheet(
+            onDismissRequest = { selected = null },
+            sheetState = sheetState,
+        ) {
+            AlertSheet(
+                alert = alert,
+                onSilence = { minutes ->
+                    scope.launch {
+                        val who = container.accountRepository.activeEntity()?.login ?: "grafusion"
+                        container.alertRepository
+                            .silence(alert, minutes, "Silenced from Grafusion mobile", who)
+                            .onSuccess {
+                                snackbar.showSnackbar("Silenced for ${humanDuration(minutes)}")
+                                selected = null
+                                reload()
+                            }
+                            .onFailure { snackbar.showSnackbar("Silence failed: ${it.message}") }
+                    }
+                },
+                onDismiss = { selected = null },
+            )
         }
     }
 }
 
 @Composable
-private fun AlertCard(alert: Alert) {
+private fun AlertSheet(alert: Alert, onSilence: (Long) -> Unit, onDismiss: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                alert.name,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            SeverityPill(alert.severity.uppercase(), severityColor(alert.severity))
+        }
+        if (alert.description.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(alert.description, style = MaterialTheme.typography.bodyMedium)
+        }
+        if (alert.labels.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Text("Labels", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            Spacer(Modifier.height(4.dp))
+            alert.labels.entries.sortedBy { it.key }.forEach { (k, v) ->
+                Text("$k = $v", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Text("Silence this alert", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SilenceButton("30m", onSilence, 30)
+            SilenceButton("2h", onSilence, 120)
+            SilenceButton("24h", onSilence, 1440)
+        }
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun SilenceButton(label: String, onSilence: (Long) -> Unit, minutes: Long) {
+    Button(
+        onClick = { onSilence(minutes) },
+        colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+    ) {
+        Icon(Icons.Filled.NotificationsOff, null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(6.dp))
+        Text(label)
+    }
+}
+
+private fun humanDuration(minutes: Long): String = when {
+    minutes >= 60 * 24 -> "${minutes / (60 * 24)}d"
+    minutes >= 60 -> "${minutes / 60}h"
+    else -> "${minutes}m"
+}
+
+@Composable
+private fun AlertCard(alert: Alert, onClick: () -> Unit) {
     val (icon, tint) = iconFor(alert)
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),

@@ -68,6 +68,12 @@ interface GrafanaApi {
         @Query("silenced") silenced: Boolean = true,
         @Query("inhibited") inhibited: Boolean = true,
     ): List<AmAlert>
+
+    @POST("api/alertmanager/grafana/api/v2/silences")
+    suspend fun createSilence(
+        @Header("Authorization") auth: String,
+        @Body body: kotlinx.serialization.json.JsonObject,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
 }
 
 @Serializable
