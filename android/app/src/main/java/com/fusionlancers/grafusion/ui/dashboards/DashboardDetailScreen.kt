@@ -24,6 +24,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
@@ -47,6 +52,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,7 +63,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
@@ -104,6 +113,10 @@ fun DashboardDetailScreen(
     var refresh by remember { mutableStateOf(RefreshInterval.OFF) }
     val panelData = remember { mutableStateMapOf<Long, PanelData?>() }
     var browserUrl by remember { mutableStateOf<String?>(null) }
+    var editMode by remember { mutableStateOf(false) }
+    val workingOrder = remember { mutableStateListOf<Long>() }
+    var saving by remember { mutableStateOf(false) }
+    var saveMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(uid) {
         loading = true
@@ -170,24 +183,72 @@ fun DashboardDetailScreen(
                     }
                 },
                 actions = {
-                    RefreshMenu(refresh, onSelect = { refresh = it })
-                    IconButton(onClick = {
-                        scope.launch {
-                            panels.forEach { panel ->
-                                panelData[panel.id] = null
-                                container.dashboardRepository
-                                    .queryPanel(panel, from = range.from, to = range.to)
-                                    .onSuccess { panelData[panel.id] = it }
-                                    .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
-                            }
+                    if (editMode) {
+                        IconButton(
+                            enabled = !saving,
+                            onClick = {
+                                editMode = false
+                                workingOrder.clear()
+                                saveMessage = null
+                            },
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Cancel edit")
                         }
-                    }) {
-                        Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
-                    }
-                    IconButton(onClick = {
-                        browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
-                    }) {
-                        Icon(Icons.Filled.OpenInBrowser, contentDescription = "Open in browser")
+                        IconButton(
+                            enabled = !saving && workingOrder.isNotEmpty(),
+                            onClick = {
+                                saving = true
+                                saveMessage = null
+                                val order = workingOrder.toList()
+                                scope.launch {
+                                    container.dashboardRepository.savePanelOrder(uid, order)
+                                        .onSuccess {
+                                            saveMessage = "Layout saved"
+                                            editMode = false
+                                            workingOrder.clear()
+                                            runCatching { container.dashboardRepository.panelsFor(uid) }
+                                                .onSuccess { panels = it }
+                                        }
+                                        .onFailure { saveMessage = "Save failed: ${it.message ?: "unknown"}" }
+                                    saving = false
+                                }
+                            },
+                        ) {
+                            if (saving) CircularProgressIndicator(
+                                color = EnergyOrange,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp),
+                            ) else Icon(Icons.Filled.Check, contentDescription = "Save layout")
+                        }
+                    } else {
+                        RefreshMenu(refresh, onSelect = { refresh = it })
+                        IconButton(onClick = {
+                            scope.launch {
+                                panels.forEach { panel ->
+                                    panelData[panel.id] = null
+                                    container.dashboardRepository
+                                        .queryPanel(panel, from = range.from, to = range.to)
+                                        .onSuccess { panelData[panel.id] = it }
+                                        .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
+                        }
+                        IconButton(onClick = {
+                            editMode = true
+                            workingOrder.clear()
+                            workingOrder.addAll(
+                                panels.sortedWith(compareBy({ it.gridY }, { it.gridX })).map { it.id }
+                            )
+                        }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit layout")
+                        }
+                        IconButton(onClick = {
+                            browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+                        }) {
+                            Icon(Icons.Filled.OpenInBrowser, contentDescription = "Open in browser")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -212,9 +273,40 @@ fun DashboardDetailScreen(
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        item { TimeRangeBar(range = range, onSelect = { range = it }) }
-                        items(bands, key = { it.key }) { band ->
-                            PanelRow(band = band, panelData = panelData)
+                        if (saveMessage != null) {
+                            item { SaveBanner(saveMessage!!) }
+                        }
+                        if (editMode) {
+                            item { EditModeBanner() }
+                            val orderedPanels = workingOrder.mapNotNull { id -> panels.firstOrNull { it.id == id } }
+                            items(orderedPanels, key = { "edit_${it.id}" }) { panel ->
+                                val idx = workingOrder.indexOf(panel.id)
+                                EditRow(
+                                    panel = panel,
+                                    data = panelData[panel.id],
+                                    isFirst = idx <= 0,
+                                    isLast = idx >= workingOrder.lastIndex,
+                                    onMoveUp = {
+                                        if (idx > 0) {
+                                            val tmp = workingOrder[idx - 1]
+                                            workingOrder[idx - 1] = workingOrder[idx]
+                                            workingOrder[idx] = tmp
+                                        }
+                                    },
+                                    onMoveDown = {
+                                        if (idx >= 0 && idx < workingOrder.lastIndex) {
+                                            val tmp = workingOrder[idx + 1]
+                                            workingOrder[idx + 1] = workingOrder[idx]
+                                            workingOrder[idx] = tmp
+                                        }
+                                    },
+                                )
+                            }
+                        } else {
+                            item { TimeRangeBar(range = range, onSelect = { range = it }) }
+                            items(bands, key = { it.key }) { band ->
+                                PanelRow(band = band, panelData = panelData)
+                            }
                         }
                     }
                 }
@@ -333,6 +425,76 @@ private fun TimeRangeBar(range: TimeRange, onSelect: (TimeRange) -> Unit) {
 }
 
 @Composable
+private fun EditModeBanner() {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = EnergyOrange.copy(alpha = 0.12f)),
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Edit, contentDescription = null, tint = EnergyOrange, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "Reorder mode — use arrows to move panels, then tap ✓ to save to Grafana.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SaveBanner(message: String) {
+    val isError = message.startsWith("Save failed", ignoreCase = true)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isError) MaterialTheme.colorScheme.errorContainer
+            else EnergyOrange.copy(alpha = 0.16f)
+        ),
+    ) {
+        Text(
+            message,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun EditRow(
+    panel: Panel,
+    data: PanelData?,
+    isFirst: Boolean,
+    isLast: Boolean,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(Modifier.weight(1f)) {
+            PanelCard(panel = panel, data = data)
+        }
+        Column {
+            IconButton(onClick = onMoveUp, enabled = !isFirst) {
+                Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up")
+            }
+            IconButton(onClick = onMoveDown, enabled = !isLast) {
+                Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down")
+            }
+        }
+    }
+}
+
+@Composable
 private fun PanelCard(panel: Panel, data: PanelData?) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -340,38 +502,59 @@ private fun PanelCard(panel: Panel, data: PanelData?) {
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    panel.title.ifBlank { "Panel ${panel.id}" },
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    panel.type,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = EnergyOrange,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            when {
-                data == null -> PanelLoading()
-                data.error != null -> PanelError(data.error)
-                data.series.isEmpty() && data.frames.isEmpty() -> PanelNoData()
-                else -> PanelBody(panel = panel, data = data)
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cardW = maxWidth
+            val padding = if (cardW < 140.dp) 8.dp else 14.dp
+            Column(Modifier.padding(padding)) {
+                PanelHeader(panel = panel, cardWidth = cardW)
+                Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
+                when {
+                    data == null -> PanelLoading()
+                    data.error != null -> PanelError(data.error)
+                    data.series.isEmpty() && data.frames.isEmpty() -> PanelNoData()
+                    else -> PanelBody(panel = panel, data = data, cardWidth = cardW)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun PanelBody(panel: Panel, data: PanelData) {
+private fun PanelHeader(panel: Panel, cardWidth: Dp) {
+    val showTypeBadge = cardWidth >= 180.dp
+    val titleStyle = when {
+        cardWidth < 120.dp -> MaterialTheme.typography.labelMedium
+        cardWidth < 180.dp -> MaterialTheme.typography.titleSmall
+        else -> MaterialTheme.typography.titleMedium
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            panel.title.ifBlank { "Panel ${panel.id}" },
+            modifier = Modifier.weight(1f),
+            style = titleStyle,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (showTypeBadge) {
+            Text(
+                panel.type,
+                style = MaterialTheme.typography.labelSmall,
+                color = EnergyOrange,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
     when (panel.type) {
         "timeseries", "graph" -> TimeseriesPanel(data)
-        "stat", "gauge", "bargauge" -> StatOrGaugePanel(panel, data)
+        "stat", "gauge", "bargauge" -> StatOrGaugePanel(panel, data, cardWidth)
         "table" -> TablePanel(data)
         "barchart" -> BarChartPanel(data)
         "logs" -> LogsPanel(data)
@@ -473,7 +656,7 @@ private fun BarChartPanel(data: PanelData) {
 }
 
 @Composable
-private fun StatOrGaugePanel(panel: Panel, data: PanelData) {
+private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
     val latest = data.series.firstOrNull()?.values?.lastOrNull { it != null }
         ?: data.frames.firstOrNull()?.let { frame ->
             frame.columns.getOrNull(frame.fieldTypes.indexOfFirst { it == "number" })
@@ -484,12 +667,20 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData) {
         latest == null -> "—"
         else -> formatValue(latest, panel.unit, panel.decimals)
     }
-    Box(Modifier.fillMaxWidth().heightIn(min = 100.dp), contentAlignment = Alignment.Center) {
+    // Scale value font to fit narrow cards without letter-wrapping.
+    // Rough char-width heuristic: at 24sp, one char ~= 12dp; leave 16dp padding on each side.
+    val availableDp = (cardWidth.value - 32f).coerceAtLeast(48f)
+    val approxCharDp = availableDp / display.length.coerceAtLeast(1)
+    val fontSize = (approxCharDp * 1.9f).coerceIn(16f, 34f)
+    Box(Modifier.fillMaxWidth().heightIn(min = 72.dp), contentAlignment = Alignment.Center) {
         Text(
             display,
-            style = MaterialTheme.typography.displaySmall,
+            fontSize = fontSize.sp,
             fontWeight = FontWeight.Bold,
             color = EnergyOrange,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
@@ -651,20 +842,70 @@ private fun formatValue(v: Double, unit: String?, decimals: Int?): String {
     val d = decimals ?: 2
     val num = "%.${d}f".format(v)
     return when (unit) {
-        null, "none", "short" -> num
+        null, "none", "short" -> shortNumber(v, d)
         "percent" -> "$num%"
         "percentunit" -> "%.${d}f%%".format(v * 100)
-        "bytes", "decbytes" -> humanBytes(v, d)
-        "s", "seconds" -> "${num}s"
-        "ms", "millisecond" -> "${num}ms"
+        "bytes", "decbytes", "bytesIEC" -> humanBytes(v, d, base = 1024)
+        "binbytes" -> humanBytes(v, d, base = 1024)
+        "decbytesSI" -> humanBytes(v, d, base = 1000)
+        "Bps", "binBps", "bytespersecond" -> humanBytes(v, d, base = 1024) + "/s"
+        "bps", "bits" -> humanBits(v, d)
+        "s", "seconds" -> humanDuration(v, d)
+        "ms", "millisecond" -> humanDuration(v / 1000.0, d)
+        "dtdurationms" -> humanDuration(v / 1000.0, d)
+        "dtdurations" -> humanDuration(v, d)
+        "µs", "us", "microsecond" -> humanDuration(v / 1_000_000.0, d)
+        "ns", "nanosecond" -> humanDuration(v / 1_000_000_000.0, d)
+        "hertz", "hz" -> "$num Hz"
+        "celsius" -> "$num °C"
+        "fahrenheit" -> "$num °F"
+        "currencyUSD" -> "$$num"
+        "currencyEUR" -> "€$num"
+        "currencyGBP" -> "£$num"
+        "currencyINR" -> "₹$num"
         else -> "$num $unit"
     }
 }
 
-private fun humanBytes(v: Double, decimals: Int): String {
-    val units = arrayOf("B", "KB", "MB", "GB", "TB", "PB")
+private fun shortNumber(v: Double, decimals: Int): String {
+    val abs = kotlin.math.abs(v)
+    return when {
+        abs >= 1_000_000_000_000 -> "%.${decimals}f T".format(v / 1_000_000_000_000.0)
+        abs >= 1_000_000_000 -> "%.${decimals}f B".format(v / 1_000_000_000.0)
+        abs >= 1_000_000 -> "%.${decimals}f M".format(v / 1_000_000.0)
+        abs >= 10_000 -> "%.${decimals}f K".format(v / 1_000.0)
+        else -> "%.${decimals}f".format(v)
+    }
+}
+
+private fun humanBytes(v: Double, decimals: Int, base: Int): String {
+    val units = if (base == 1024)
+        arrayOf("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    else arrayOf("B", "KB", "MB", "GB", "TB", "PB")
     var value = v
     var idx = 0
-    while (value >= 1024 && idx < units.size - 1) { value /= 1024; idx++ }
+    while (kotlin.math.abs(value) >= base && idx < units.size - 1) { value /= base; idx++ }
     return "%.${decimals}f %s".format(value, units[idx])
+}
+
+private fun humanBits(v: Double, decimals: Int): String {
+    val units = arrayOf("bit", "Kbit", "Mbit", "Gbit", "Tbit")
+    var value = v
+    var idx = 0
+    while (kotlin.math.abs(value) >= 1000 && idx < units.size - 1) { value /= 1000; idx++ }
+    return "%.${decimals}f %s".format(value, units[idx])
+}
+
+/** Format seconds as a duration Grafana-style: 32s, 5.2 min, 3.4 h, 28.6 d, 4.1 w, 1.3 y. */
+private fun humanDuration(sec: Double, decimals: Int): String {
+    val abs = kotlin.math.abs(sec)
+    return when {
+        abs < 1 -> "%.${decimals}f ms".format(sec * 1000)
+        abs < 60 -> if (sec == sec.toLong().toDouble()) "${sec.toLong()}s" else "%.${decimals}f s".format(sec)
+        abs < 3600 -> "%.1f min".format(sec / 60.0)
+        abs < 86400 -> "%.1f h".format(sec / 3600.0)
+        abs < 604800 -> "%.1f d".format(sec / 86400.0)
+        abs < 31_536_000 -> "%.1f w".format(sec / 604800.0)
+        else -> "%.1f y".format(sec / 31_536_000.0)
+    }
 }

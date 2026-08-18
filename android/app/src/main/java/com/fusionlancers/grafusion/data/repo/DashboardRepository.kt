@@ -11,11 +11,15 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 class DashboardRepository(
@@ -98,6 +102,84 @@ class DashboardRepository(
         }
         val resp = api.queryDatasource(auth, body)
         PanelParser.parseQueryResponse(resp)
+    }
+
+    /**
+     * Save a new panel ordering by rewriting each panel's gridPos to match [orderedPanelIds],
+     * flowing left-to-right in bands of up to 24 columns. Preserves each panel's original width and height.
+     * Returns Result.success on 200 from Grafana, else failure with the server error.
+     */
+    suspend fun savePanelOrder(uid: String, orderedPanelIds: List<Long>): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val detail = api.dashboardByUid(auth, uid)
+        val dashboard = detail.dashboard
+        val originalPanels = dashboard["panels"]?.jsonArray ?: error("Dashboard has no panels array")
+
+        // Build lookup: panelId -> original panel JSON, preserving gridW/H.
+        val byId = mutableMapOf<Long, JsonObject>()
+        originalPanels.forEach { el ->
+            val obj = el.jsonObject
+            val id = obj["id"]?.jsonPrimitive?.let { runCatching { it.content.toLong() }.getOrNull() } ?: return@forEach
+            byId[id] = obj
+        }
+
+        // Compute new gridPos flowing left-to-right.
+        val newPositions = mutableMapOf<Long, Triple<Int, Int, Int>>() // id -> (x, y, w) with h from original
+        var cursorX = 0
+        var cursorY = 0
+        var bandH = 0
+        for (id in orderedPanelIds) {
+            val original = byId[id] ?: continue
+            val gp = original["gridPos"]?.jsonObject
+            val w = (gp?.get("w")?.jsonPrimitive?.let { runCatching { it.content.toInt() }.getOrNull() } ?: 8).coerceIn(1, 24)
+            val h = (gp?.get("h")?.jsonPrimitive?.let { runCatching { it.content.toInt() }.getOrNull() } ?: 8).coerceIn(1, 40)
+            if (cursorX + w > 24) {
+                cursorX = 0
+                cursorY += bandH
+                bandH = 0
+            }
+            newPositions[id] = Triple(cursorX, cursorY, w)
+            cursorX += w
+            if (h > bandH) bandH = h
+        }
+
+        // Rebuild panels array with rewritten gridPos where the panel is in the order set.
+        val rewrittenPanels = buildJsonArray {
+            originalPanels.forEach { el ->
+                val obj = el.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.let { runCatching { it.content.toLong() }.getOrNull() }
+                val newPos = id?.let { newPositions[it] }
+                if (newPos == null) {
+                    add(obj)
+                } else {
+                    val (x, y, w) = newPos
+                    val origH = obj["gridPos"]?.jsonObject?.get("h")?.jsonPrimitive?.let { runCatching { it.content.toInt() }.getOrNull() } ?: 8
+                    add(buildJsonObject {
+                        obj.forEach { (k, v) -> if (k != "gridPos") put(k, v) }
+                        put("gridPos", buildJsonObject {
+                            put("x", JsonPrimitive(x))
+                            put("y", JsonPrimitive(y))
+                            put("w", JsonPrimitive(w))
+                            put("h", JsonPrimitive(origH))
+                        })
+                    })
+                }
+            }
+        }
+
+        val newDashboard = buildJsonObject {
+            dashboard.forEach { (k, v) -> if (k != "panels") put(k, v) }
+            put("panels", rewrittenPanels)
+        }
+        val body = buildJsonObject {
+            put("dashboard", newDashboard)
+            put("overwrite", JsonPrimitive(true))
+            put("message", JsonPrimitive("Reordered from Grafusion mobile"))
+        }
+        val resp = api.saveDashboard(auth, body)
+        if (resp.status != null && resp.status != "success") error(resp.status)
     }
 
     private fun refIdFor(idx: Int): String = ('A' + idx).toString()

@@ -41,7 +41,23 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
         @Body body: kotlinx.serialization.json.JsonObject,
     ): kotlinx.serialization.json.JsonObject
+
+    @POST("api/dashboards/db")
+    suspend fun saveDashboard(
+        @Header("Authorization") auth: String,
+        @Body body: kotlinx.serialization.json.JsonObject,
+    ): SaveDashboardResponse
 }
+
+@Serializable
+data class SaveDashboardResponse(
+    val id: Long? = null,
+    val uid: String? = null,
+    val url: String? = null,
+    val status: String? = null,
+    val version: Int? = null,
+    val slug: String? = null,
+)
 
 @Serializable
 data class LoginBody(val user: String, val password: String)
