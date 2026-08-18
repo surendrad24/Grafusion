@@ -6,6 +6,7 @@ import com.fusionlancers.grafusion.data.api.GrafanaApiFactory
 import com.fusionlancers.grafusion.data.db.AppDatabase
 import com.fusionlancers.grafusion.data.prefs.ThemePreferences
 import com.fusionlancers.grafusion.data.repo.AccountRepository
+import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
 
@@ -34,6 +35,11 @@ class AppContainer(context: Context) {
 
     val dashboardRepository = DashboardRepository(
         dashboardDao = db.dashboardDao(),
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
+    )
+
+    val alertRepository = AlertRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
     )

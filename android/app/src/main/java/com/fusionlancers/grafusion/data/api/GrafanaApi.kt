@@ -60,7 +60,33 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
         @Path("id") id: Long,
     ): retrofit2.Response<Unit>
+
+    @GET("api/alertmanager/grafana/api/v2/alerts")
+    suspend fun grafanaAlerts(
+        @Header("Authorization") auth: String,
+        @Query("active") active: Boolean = true,
+        @Query("silenced") silenced: Boolean = true,
+        @Query("inhibited") inhibited: Boolean = true,
+    ): List<AmAlert>
 }
+
+@Serializable
+data class AmAlert(
+    val labels: Map<String, String> = emptyMap(),
+    val annotations: Map<String, String> = emptyMap(),
+    val startsAt: String? = null,
+    val endsAt: String? = null,
+    val generatorURL: String? = null,
+    val fingerprint: String? = null,
+    val status: AmStatus = AmStatus(),
+)
+
+@Serializable
+data class AmStatus(
+    val state: String = "active",
+    val silencedBy: List<String> = emptyList(),
+    val inhibitedBy: List<String> = emptyList(),
+)
 
 @Serializable
 data class SaveDashboardResponse(
