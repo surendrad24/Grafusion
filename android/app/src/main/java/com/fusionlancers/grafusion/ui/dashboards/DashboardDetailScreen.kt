@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
@@ -88,6 +89,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -96,6 +98,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -108,6 +111,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
+import com.fusionlancers.grafusion.data.model.Alert
+import com.fusionlancers.grafusion.data.model.AlertState
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.PanelGroup
@@ -137,6 +142,9 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** Container access for deeply-nested panel composables that need to call repositories. */
+private val LocalAppContainer = staticCompositionLocalOf<AppContainer?> { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -243,6 +251,7 @@ fun DashboardDetailScreen(
         }
     }
 
+    CompositionLocalProvider(LocalAppContainer provides container) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -571,6 +580,7 @@ fun DashboardDetailScreen(
                 }
             }
         }
+    }
     }
 }
 
@@ -1343,7 +1353,9 @@ private fun PanelCard(
                     onOpenBrowser = onOpenBrowser,
                 )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
+                val selfLoads = panel.type == "alertlist"
                 when {
+                    selfLoads -> PanelBody(panel = panel, data = data ?: PanelData(emptyList()), cardWidth = cardW)
                     data == null -> PanelLoading()
                     data.error != null -> PanelError(data.error)
                     data.series.isEmpty() && data.frames.isEmpty() -> PanelNoData()
@@ -1436,6 +1448,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "logs" -> LogsPanel(data)
         "text" -> TextPanel(panel)
         "geomap", "worldmap-panel" -> GeomapPanel(data)
+        "alertlist" -> AlertListPanel(panel)
         else -> UnsupportedPanel(panel.type, null)
     }
 }
@@ -1449,50 +1462,85 @@ private fun TimeseriesPanel(data: PanelData) {
         }
     }
     if (validSeries.isEmpty()) { PanelNoData(); return }
+    val hidden = remember(validSeries) { mutableStateListOf<String>() }
+    val visibleSeries = validSeries.filter { it.first.name !in hidden }
     val producer = remember { CartesianChartModelProducer() }
-    LaunchedEffect(validSeries) {
+    val lineColors = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE))
+    // Compose lines matching only the visible subset, in the same order, so colors stay stable
+    // relative to the visible slice (Vico maps line providers positionally).
+    LaunchedEffect(visibleSeries) {
+        if (visibleSeries.isEmpty()) return@LaunchedEffect
         producer.runTransaction {
             lineSeries {
-                validSeries.forEach { (_, pairs) ->
+                visibleSeries.forEach { (_, pairs) ->
                     series(x = pairs.map { it.first.toDouble() }, y = pairs.map { it.second })
                 }
             }
         }
     }
-    Box(Modifier.fillMaxWidth().height(200.dp)) {
-        val lineColors = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE))
-        val layer = rememberLineCartesianLayer(
-            lineProvider = LineCartesianLayer.LineProvider.series(
-                lineColors.map { color ->
-                    LineCartesianLayer.rememberLine(
-                        fill = LineCartesianLayer.LineFill.single(fill(color)),
-                    )
-                }
-            )
-        )
-        CartesianChartHost(
-            chart = rememberCartesianChart(
-                layer,
-                startAxis = VerticalAxis.rememberStart(),
-                bottomAxis = HorizontalAxis.rememberBottom(
-                    valueFormatter = { _, value, _ ->
-                        SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(value.toLong()))
+    if (visibleSeries.isEmpty()) {
+        Box(Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+            Text("All series hidden - tap a legend chip to show", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        }
+    } else {
+        Box(Modifier.fillMaxWidth().height(200.dp)) {
+            val layer = rememberLineCartesianLayer(
+                lineProvider = LineCartesianLayer.LineProvider.series(
+                    lineColors.map { color ->
+                        LineCartesianLayer.rememberLine(
+                            fill = LineCartesianLayer.LineFill.single(fill(color)),
+                        )
                     }
+                )
+            )
+            CartesianChartHost(
+                chart = rememberCartesianChart(
+                    layer,
+                    startAxis = VerticalAxis.rememberStart(),
+                    bottomAxis = HorizontalAxis.rememberBottom(
+                        valueFormatter = { _, value, _ ->
+                            SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(value.toLong()))
+                        }
+                    ),
                 ),
-            ),
-            modelProducer = producer,
-            scrollState = rememberVicoScrollState(scrollEnabled = false),
-        )
+                modelProducer = producer,
+                scrollState = rememberVicoScrollState(scrollEnabled = false),
+            )
+        }
     }
     if (validSeries.size > 1) {
         Spacer(Modifier.height(6.dp))
         Column(Modifier.fillMaxWidth()) {
-            val legendColors = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE))
             validSeries.take(6).forEachIndexed { idx, (s, _) ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(vertical = 2.dp)) {
-                    Box(Modifier.size(10.dp).background(legendColors[idx % legendColors.size], RoundedCornerShape(2.dp)))
+                val isHidden = s.name in hidden
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp)
+                        .pointerInput(s.name) {
+                            detectTapGestures(onTap = {
+                                if (isHidden) hidden.remove(s.name) else hidden.add(s.name)
+                            })
+                        },
+                ) {
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .background(
+                                if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                                else lineColors[idx % lineColors.size],
+                                RoundedCornerShape(2.dp),
+                            )
+                    )
                     Spacer(Modifier.width(6.dp))
-                    Text(s.name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f), maxLines = 1)
+                    Text(
+                        s.name,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
+                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        maxLines = 1,
+                    )
                 }
             }
         }
@@ -1867,6 +1915,97 @@ private fun PieChartPanel(data: PanelData) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AlertListPanel(panel: Panel) {
+    val container = LocalAppContainer.current
+    val options = panel.options
+    val maxItems = (options?.get("maxItems") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content?.toIntOrNull() ?: 10
+    val stateFilter = remember(options) {
+        val block = options?.get("stateFilter") as? kotlinx.serialization.json.JsonObject
+        buildSet {
+            if (block?.get("firing")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() } != false) add(AlertState.FIRING)
+            if (block?.get("pending")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() } == true) add(AlertState.PENDING)
+            if (block?.get("normal")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() } == true) add(AlertState.NORMAL)
+            // Grafana's "no_data" and "error" map to FIRING semantically for the mobile list.
+            if (isEmpty()) add(AlertState.FIRING)
+        }
+    }
+    var alerts by remember { mutableStateOf<List<Alert>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(panel.id, container) {
+        if (container == null) return@LaunchedEffect
+        container.alertRepository.fetchAlerts()
+            .onSuccess { alerts = it }
+            .onFailure { error = it.message ?: "Failed to load alerts" }
+    }
+    when {
+        container == null -> PanelError("No account context")
+        error != null -> PanelError(error!!)
+        alerts == null -> PanelLoading()
+        else -> {
+            val filtered = alerts!!.filter { it.state in stateFilter }.take(maxItems)
+            if (filtered.isEmpty()) {
+                Text(
+                    "No alerts match the current filter.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                )
+                return
+            }
+            Column(Modifier.fillMaxWidth()) {
+                filtered.forEach { alert ->
+                    AlertListRow(alert)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AlertListRow(alert: Alert) {
+    val (dot, label) = when (alert.state) {
+        AlertState.FIRING -> Color(0xFFEF4444) to "Firing"
+        AlertState.PENDING -> Color(0xFFF59E0B) to "Pending"
+        AlertState.SUPPRESSED -> Color(0xFF9CA3AF) to "Silenced"
+        AlertState.NORMAL -> Color(0xFF10B981) to "Normal"
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(8.dp).background(dot, RoundedCornerShape(4.dp)))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                alert.name,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (alert.summary.isNotBlank()) {
+                Text(
+                    alert.summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = dot,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
