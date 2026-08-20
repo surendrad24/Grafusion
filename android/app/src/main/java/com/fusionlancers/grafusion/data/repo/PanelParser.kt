@@ -2,6 +2,7 @@ package com.fusionlancers.grafusion.data.repo
 
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
+import com.fusionlancers.grafusion.data.model.PanelGroup
 import com.fusionlancers.grafusion.data.model.RawFrame
 import com.fusionlancers.grafusion.data.model.Series
 import kotlinx.serialization.json.JsonNull
@@ -28,6 +29,35 @@ internal object PanelParser {
             }
         }
         return out
+    }
+
+    /** Group the dashboard's panels into rows (Grafana `type=row` containers) + one leading ungrouped run. */
+    fun parseGroups(dashboard: JsonObject): List<PanelGroup> {
+        val raw = dashboard["panels"]?.jsonArray ?: return emptyList()
+        val groups = mutableListOf<PanelGroup>()
+        val leading = mutableListOf<Panel>()
+        var synthetic = 100000L
+        for (element in raw) {
+            val obj = element.jsonObject
+            if (obj["type"]?.jsonPrimitive?.contentOrNullSafe() == "row") {
+                if (leading.isNotEmpty()) {
+                    groups += PanelGroup(title = null, collapsed = false, panels = leading.toList())
+                    leading.clear()
+                }
+                val title = obj["title"]?.jsonPrimitive?.contentOrNullSafe().orEmpty().ifBlank { "Row" }
+                val collapsed = obj["collapsed"]?.jsonPrimitive?.let { runCatching { it.content.toBooleanStrict() }.getOrNull() } ?: false
+                val panels = obj["panels"]?.jsonArray
+                    ?.mapNotNull { parseOne(it.jsonObject, ++synthetic) }
+                    .orEmpty()
+                groups += PanelGroup(title = title, collapsed = collapsed, panels = panels)
+            } else {
+                parseOne(obj, ++synthetic)?.let(leading::add)
+            }
+        }
+        if (leading.isNotEmpty()) {
+            groups += PanelGroup(title = null, collapsed = false, panels = leading.toList())
+        }
+        return groups
     }
 
     private fun parseOne(obj: JsonObject, fallbackId: Long): Panel? {

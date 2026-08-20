@@ -2,6 +2,13 @@ package com.fusionlancers.grafusion.data.model
 
 import kotlinx.serialization.json.JsonObject
 
+/** A group of panels — either an ungrouped run (title=null) or a Grafana row (title + collapsed). */
+data class PanelGroup(
+    val title: String?,
+    val collapsed: Boolean,
+    val panels: List<Panel>,
+)
+
 /** A single panel definition parsed from a Grafana dashboard JSON. */
 data class Panel(
     val id: Long,

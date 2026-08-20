@@ -1,7 +1,11 @@
 package com.fusionlancers.grafusion.ui.dashboards
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -19,20 +23,36 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Title
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -47,9 +67,26 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.AssistChipDefaults
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -62,7 +99,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -71,7 +110,9 @@ import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
+import com.fusionlancers.grafusion.data.model.PanelGroup
 import com.fusionlancers.grafusion.data.model.RawFrame
+import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.ui.theme.DataPurple
 import com.fusionlancers.grafusion.ui.theme.EnergyOrange
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
@@ -108,28 +149,64 @@ fun DashboardDetailScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var panels by remember { mutableStateOf<List<Panel>>(emptyList()) }
+    var groups by remember { mutableStateOf<List<PanelGroup>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var range by remember { mutableStateOf(TimeRange.LAST_6H) }
+    var customRange by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var customDialogOpen by remember { mutableStateOf(false) }
     var refresh by remember { mutableStateOf(RefreshInterval.OFF) }
+    val fromExpr = customRange?.first ?: range.from
+    val toExpr = customRange?.second ?: range.to
     val panelData = remember { mutableStateMapOf<Long, PanelData?>() }
     var browserUrl by remember { mutableStateOf<String?>(null) }
     var editMode by remember { mutableStateOf(false) }
-    val workingOrder = remember { mutableStateListOf<Long>() }
+    // Edit-mode state: workingOps is the ordered list of final panels; ops missing
+    // an id in [originalIds] are treated as deleted on save.
+    val workingOps = remember { mutableStateListOf<EditOp>() }
+    val originalIds = remember { mutableStateListOf<Long>() }
+    val nextFreshId = remember { mutableStateOf(0L) }
+    var renamingIndex by remember { mutableStateOf<Int?>(null) }
+    var addSheetOpen by remember { mutableStateOf(false) }
+    var discardConfirmOpen by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var saveMessage by remember { mutableStateOf<String?>(null) }
+    var starred by remember { mutableStateOf<Boolean?>(null) }
+    var dashboardId by remember { mutableStateOf<Long?>(null) }
+    var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
+    var offline by remember { mutableStateOf(false) }
+    // Collapsed row-group keys in view mode (title-based; ungrouped runs never collapse).
+    val collapsedRows = remember { mutableStateListOf<String>() }
 
     LaunchedEffect(uid) {
         loading = true
         error = null
         runCatching { container.dashboardRepository.panelsFor(uid) }
-            .onSuccess { list ->
-                panels = list
+            .onSuccess { result ->
+                panels = result.panels
+                groups = result.groups
+                offline = result.fromCache
                 loading = false
             }
             .onFailure { error = it.message ?: "Failed to load dashboard"; loading = false }
         val entity = container.accountRepository.activeEntity()
         browserUrl = entity?.let { "${it.grafanaUrl}/d/$uid" }
+        // Look up starred + dashboardId from the local cache so we can toggle from here.
+        container.dashboardRepository.dashboards.collect { list ->
+            val row = list.firstOrNull { it.uid == uid }
+            starred = row?.isStarred
+            dashboardId = row?.dashboardId
+        }
+    }
+
+    // Seed collapsed rows from Grafana's `collapsed: true` flag the first time a group set arrives.
+    LaunchedEffect(groups) {
+        collapsedRows.clear()
+        groups.forEachIndexed { gIdx, group ->
+            if (group.title != null && group.collapsed) {
+                collapsedRows += "row_${gIdx}_${group.title}"
+            }
+        }
     }
 
     // Fetch panel data whenever panel list or range changes.
@@ -142,7 +219,7 @@ fun DashboardDetailScreen(
             panelData[panel.id] = null
             scope.launch {
                 container.dashboardRepository
-                    .queryPanel(panel, from = range.from, to = range.to)
+                    .queryPanel(panel, from = fromExpr, to = toExpr)
                     .onSuccess { panelData[panel.id] = it }
                     .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
             }
@@ -158,7 +235,7 @@ fun DashboardDetailScreen(
                 if (panel.targets.isEmpty()) return@forEach
                 scope.launch {
                     container.dashboardRepository
-                        .queryPanel(panel, from = range.from, to = range.to)
+                        .queryPanel(panel, from = fromExpr, to = toExpr)
                         .onSuccess { panelData[panel.id] = it }
                         .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
                 }
@@ -171,12 +248,30 @@ fun DashboardDetailScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        title,
-                        maxLines = 1,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            title,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f, fill = false),
+                        )
+                        if (offline) {
+                            Spacer(Modifier.width(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EnergyOrange.copy(alpha = 0.18f),
+                            ) {
+                                Text(
+                                    "Offline",
+                                    color = EnergyOrange,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -185,51 +280,71 @@ fun DashboardDetailScreen(
                 },
                 actions = {
                     if (editMode) {
+                        val dirtyCount = remember(workingOps.toList(), originalIds.toList()) {
+                            computeDirtyCount(workingOps, originalIds, panels)
+                        }
                         IconButton(
                             enabled = !saving,
                             onClick = {
-                                editMode = false
-                                workingOrder.clear()
-                                saveMessage = null
+                                if (dirtyCount > 0) discardConfirmOpen = true
+                                else { editMode = false; workingOps.clear(); saveMessage = null }
                             },
                         ) {
-                            Icon(Icons.Filled.Close, contentDescription = "Cancel edit")
+                            Icon(Icons.Filled.Close, contentDescription = "Discard edits")
                         }
-                        IconButton(
-                            enabled = !saving && workingOrder.isNotEmpty(),
-                            onClick = {
-                                saving = true
-                                saveMessage = null
-                                val order = workingOrder.toList()
-                                scope.launch {
-                                    container.dashboardRepository.savePanelOrder(uid, order)
-                                        .onSuccess {
-                                            saveMessage = "Layout saved"
-                                            editMode = false
-                                            workingOrder.clear()
-                                            panelData.clear()
-                                            runCatching { container.dashboardRepository.panelsFor(uid) }
-                                                .onSuccess { panels = it }
-                                        }
-                                        .onFailure { saveMessage = "Save failed: ${it.message ?: "unknown"}" }
-                                    saving = false
-                                }
-                            },
-                        ) {
-                            if (saving) CircularProgressIndicator(
-                                color = EnergyOrange,
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(18.dp),
-                            ) else Icon(Icons.Filled.Check, contentDescription = "Save layout")
+                        BadgedBox(badge = { if (dirtyCount > 0) Badge { Text(dirtyCount.toString()) } }) {
+                            IconButton(
+                                enabled = !saving && workingOps.isNotEmpty(),
+                                onClick = {
+                                    saving = true
+                                    saveMessage = null
+                                    val ops = workingOps.map { it.toRepoOp() }
+                                    scope.launch {
+                                        container.dashboardRepository.saveDashboardLayout(uid, ops)
+                                            .onSuccess {
+                                                saveMessage = "Layout saved"
+                                                editMode = false
+                                                workingOps.clear()
+                                                originalIds.clear()
+                                                panelData.clear()
+                                                runCatching { container.dashboardRepository.panelsFor(uid) }
+                                                    .onSuccess { panels = it.panels; groups = it.groups; offline = it.fromCache }
+                                            }
+                                            .onFailure { saveMessage = "Save failed: ${it.message ?: "unknown"}" }
+                                        saving = false
+                                    }
+                                },
+                            ) {
+                                if (saving) CircularProgressIndicator(
+                                    color = EnergyOrange,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(18.dp),
+                                ) else Icon(Icons.Filled.Check, contentDescription = "Save layout")
+                            }
                         }
                     } else {
+                        val id = dashboardId
+                        val isStar = starred
+                        if (id != null && isStar != null) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    container.dashboardRepository.toggleStar(uid, id, !isStar)
+                                }
+                            }) {
+                                Icon(
+                                    if (isStar) Icons.Filled.Star else Icons.Filled.StarBorder,
+                                    contentDescription = if (isStar) "Unstar" else "Star",
+                                    tint = if (isStar) EnergyOrange else MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                         RefreshMenu(refresh, onSelect = { refresh = it })
                         IconButton(onClick = {
                             scope.launch {
                                 panels.forEach { panel ->
                                     panelData[panel.id] = null
                                     container.dashboardRepository
-                                        .queryPanel(panel, from = range.from, to = range.to)
+                                        .queryPanel(panel, from = fromExpr, to = toExpr)
                                         .onSuccess { panelData[panel.id] = it }
                                         .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
                                 }
@@ -239,10 +354,12 @@ fun DashboardDetailScreen(
                         }
                         IconButton(onClick = {
                             editMode = true
-                            workingOrder.clear()
-                            workingOrder.addAll(
-                                panels.sortedWith(compareBy({ it.gridY }, { it.gridX })).map { it.id }
-                            )
+                            workingOps.clear()
+                            originalIds.clear()
+                            val sorted = panels.sortedWith(compareBy({ it.gridY }, { it.gridX }))
+                            workingOps.addAll(sorted.map { EditOp.existing(it) })
+                            originalIds.addAll(sorted.map { it.id })
+                            nextFreshId.value = ((sorted.maxOfOrNull { it.id } ?: 0L) + 1L).coerceAtLeast(1L)
                         }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Edit layout")
                         }
@@ -279,42 +396,188 @@ fun DashboardDetailScreen(
                             item { SaveBanner(saveMessage!!) }
                         }
                         if (editMode) {
-                            item { EditModeBanner() }
-                            val orderedPanels = workingOrder.mapNotNull { id -> panels.firstOrNull { it.id == id } }
-                            items(orderedPanels, key = { "edit_${it.id}" }) { panel ->
-                                val idx = workingOrder.indexOf(panel.id)
+                            item { EditModeBanner(count = workingOps.size) }
+                            itemsIndexed(workingOps.toList(), key = { _, op -> "edit_${op.finalId}" }) { idx, op ->
+                                val previewPanel = op.sourceId?.let { s -> panels.firstOrNull { it.id == s } }
                                 EditRow(
-                                    panel = panel,
-                                    data = panelData[panel.id],
+                                    op = op,
+                                    previewPanel = previewPanel,
+                                    data = previewPanel?.let { panelData[it.id] },
                                     isFirst = idx <= 0,
-                                    isLast = idx >= workingOrder.lastIndex,
+                                    isLast = idx >= workingOps.lastIndex,
                                     onMoveUp = {
                                         if (idx > 0) {
-                                            val tmp = workingOrder[idx - 1]
-                                            workingOrder[idx - 1] = workingOrder[idx]
-                                            workingOrder[idx] = tmp
+                                            val tmp = workingOps[idx - 1]
+                                            workingOps[idx - 1] = workingOps[idx]
+                                            workingOps[idx] = tmp
                                         }
                                     },
                                     onMoveDown = {
-                                        if (idx >= 0 && idx < workingOrder.lastIndex) {
-                                            val tmp = workingOrder[idx + 1]
-                                            workingOrder[idx + 1] = workingOrder[idx]
-                                            workingOrder[idx] = tmp
+                                        if (idx >= 0 && idx < workingOps.lastIndex) {
+                                            val tmp = workingOps[idx + 1]
+                                            workingOps[idx + 1] = workingOps[idx]
+                                            workingOps[idx] = tmp
                                         }
                                     },
+                                    onDrag = { deltaIdx ->
+                                        val target = (idx + deltaIdx).coerceIn(0, workingOps.lastIndex)
+                                        if (target != idx) {
+                                            val moved = workingOps.removeAt(idx)
+                                            workingOps.add(target, moved)
+                                        }
+                                    },
+                                    onResize = { w, h -> workingOps[idx] = op.copy(w = w, h = h) },
+                                    onRename = { renamingIndex = idx },
+                                    onDuplicate = {
+                                        val fresh = nextFreshId.value.also { nextFreshId.value = it + 1 }
+                                        val clone = op.copy(
+                                            finalId = fresh,
+                                            sourceId = op.sourceId,          // clone from same source JSON
+                                            newTitle = (op.newTitle ?: previewPanel?.title?.ifBlank { null } ?: "Panel")
+                                                .let { "$it (copy)" },
+                                        )
+                                        workingOps.add(idx + 1, clone)
+                                    },
+                                    onDelete = { workingOps.removeAt(idx) },
                                 )
                             }
-                        } else {
-                            item { TimeRangeBar(range = range, onSelect = { range = it }) }
-                            items(bands, key = { it.key }) { band ->
-                                PanelRow(band = band, panelData = panelData)
+                            item {
+                                OutlinedButton(
+                                    onClick = { addSheetOpen = true },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                ) {
+                                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text("Add panel")
+                                }
                             }
+                        } else {
+                            item {
+                                TimeRangeBar(
+                                    range = range,
+                                    customLabel = customRange?.let { "${it.first} → ${it.second}" },
+                                    onSelect = { customRange = null; range = it },
+                                    onOpenCustom = { customDialogOpen = true },
+                                )
+                            }
+                            renderGroupedPanels(
+                                groups = groups,
+                                fallbackBands = bands,
+                                useGrid = useGrid,
+                                panelData = panelData,
+                                grafanaUrl = browserUrl?.substringBefore("/d/"),
+                                dashboardUid = uid,
+                                collapsedRows = collapsedRows,
+                                onToggleRow = { key ->
+                                    if (collapsedRows.contains(key)) collapsedRows.remove(key)
+                                    else collapsedRows.add(key)
+                                },
+                                onExpand = { fullscreenPanel = it },
+                                onCopyLink = { url -> copyToClipboard(context, url) },
+                                onOpenBrowser = { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                            )
                         }
                     }
                 }
             }
         }
     }
+
+    if (customDialogOpen) {
+        CustomTimeRangeDialog(
+            initialFrom = customRange?.first ?: range.from,
+            initialTo = customRange?.second ?: range.to,
+            onDismiss = { customDialogOpen = false },
+            onApply = { f, t ->
+                customRange = f to t
+                customDialogOpen = false
+            },
+        )
+    }
+
+    renamingIndex?.let { idx ->
+        val current = workingOps.getOrNull(idx) ?: run { renamingIndex = null; return@let }
+        val fallback = current.sourceId?.let { s -> panels.firstOrNull { it.id == s }?.title }.orEmpty()
+        RenameDialog(
+            initial = current.newTitle ?: fallback,
+            onDismiss = { renamingIndex = null },
+            onApply = { newTitle ->
+                workingOps[idx] = current.copy(newTitle = newTitle.trim().ifBlank { null })
+                renamingIndex = null
+            },
+        )
+    }
+
+    if (addSheetOpen) {
+        AddPanelSheet(
+            onDismiss = { addSheetOpen = false },
+            onPick = { type, title ->
+                val fresh = nextFreshId.value.also { nextFreshId.value = it + 1 }
+                workingOps.add(EditOp.new(finalId = fresh, type = type, title = title))
+                addSheetOpen = false
+            },
+        )
+    }
+
+    if (discardConfirmOpen) {
+        AlertDialog(
+            onDismissRequest = { discardConfirmOpen = false },
+            title = { Text("Discard changes?") },
+            text = { Text("Your edits to this dashboard's layout will be lost.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    discardConfirmOpen = false
+                    editMode = false
+                    workingOps.clear()
+                    originalIds.clear()
+                    saveMessage = null
+                }) { Text("Discard", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { discardConfirmOpen = false }) { Text("Keep editing") } },
+        )
+    }
+
+    fullscreenPanel?.let { panel ->
+        Dialog(
+            onDismissRequest = { fullscreenPanel = null },
+            properties = DialogProperties(usePlatformDefaultWidth = false),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(12.dp),
+            ) {
+                Column(Modifier.fillMaxSize()) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            panel.title.ifBlank { "Panel ${panel.id}" },
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        IconButton(onClick = { fullscreenPanel = null }) {
+                            Icon(Icons.Filled.FullscreenExit, contentDescription = "Close fullscreen")
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.fillMaxSize()) {
+                        PanelCard(panel = panel, data = panelData[panel.id])
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun copyToClipboard(context: Context, text: String) {
+    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    cm.setPrimaryClip(ClipData.newPlainText("Grafusion", text))
+    Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
 }
 
 private data class PanelBand(val key: String, val panels: List<Panel>, val heightDp: Int)
@@ -355,8 +618,15 @@ private fun groupIntoRows(all: List<Panel>, useGrid: Boolean): List<PanelBand> {
 }
 
 @Composable
-private fun PanelRow(band: PanelBand, panelData: androidx.compose.runtime.snapshots.SnapshotStateMap<Long, PanelData?>) {
-    // Let the panel body dictate height — Grafana gridH assumes desktop pixel grid that dwarfs mobile cards.
+private fun PanelRow(
+    band: PanelBand,
+    panelData: androidx.compose.runtime.snapshots.SnapshotStateMap<Long, PanelData?>,
+    grafanaUrl: String?,
+    dashboardUid: String,
+    onExpand: (Panel) -> Unit,
+    onCopyLink: (String) -> Unit,
+    onOpenBrowser: (String) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -364,11 +634,20 @@ private fun PanelRow(band: PanelBand, panelData: androidx.compose.runtime.snapsh
     ) {
         band.panels.forEach { panel ->
             Box(Modifier.weight(panel.gridW.toFloat().coerceAtLeast(1f)).fillMaxWidth()) {
-                PanelCard(panel = panel, data = panelData[panel.id])
+                PanelCard(
+                    panel = panel,
+                    data = panelData[panel.id],
+                    onExpand = { onExpand(panel) },
+                    onCopyLink = grafanaUrl?.let { { onCopyLink(panelUrl(it, dashboardUid, panel.id)) } },
+                    onOpenBrowser = grafanaUrl?.let { { onOpenBrowser(panelUrl(it, dashboardUid, panel.id)) } },
+                )
             }
         }
     }
 }
+
+private fun panelUrl(baseUrl: String, dashboardUid: String, panelId: Long): String =
+    "${baseUrl.trimEnd('/')}/d/$dashboardUid?viewPanel=$panelId"
 
 private enum class TimeRange(val label: String, val from: String, val to: String) {
     LAST_5M("5m", "now-5m", "now"),
@@ -381,6 +660,8 @@ private enum class TimeRange(val label: String, val from: String, val to: String
 
 private enum class RefreshInterval(val label: String, val millis: Long?) {
     OFF("Off", null),
+    LIVE("Live (1s)", 1_000L),
+    S2("2s", 2_000L),
     S5("5s", 5_000L),
     S10("10s", 10_000L),
     S30("30s", 30_000L),
@@ -414,22 +695,98 @@ private fun RefreshMenu(current: RefreshInterval, onSelect: (RefreshInterval) ->
 }
 
 @Composable
-private fun TimeRangeBar(range: TimeRange, onSelect: (TimeRange) -> Unit) {
-    val options = TimeRange.entries
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        options.forEachIndexed { i, opt ->
-            SegmentedButton(
-                selected = range == opt,
-                onClick = { onSelect(opt) },
-                shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
-                label = { Text(opt.label, fontWeight = FontWeight.Medium) },
+private fun TimeRangeBar(
+    range: TimeRange,
+    customLabel: String?,
+    onSelect: (TimeRange) -> Unit,
+    onOpenCustom: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        val options = TimeRange.entries
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, opt ->
+                SegmentedButton(
+                    selected = customLabel == null && range == opt,
+                    onClick = { onSelect(opt) },
+                    shape = SegmentedButtonDefaults.itemShape(index = i, count = options.size),
+                    label = { Text(opt.label, fontWeight = FontWeight.Medium) },
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            AssistChip(
+                onClick = onOpenCustom,
+                label = { Text(customLabel ?: "Custom range…", maxLines = 1) },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = if (customLabel != null) EnergyOrange.copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface,
+                    labelColor = if (customLabel != null) EnergyOrange else MaterialTheme.colorScheme.onSurface,
+                ),
             )
         }
     }
 }
 
 @Composable
-private fun EditModeBanner() {
+private fun CustomTimeRangeDialog(
+    initialFrom: String,
+    initialTo: String,
+    onDismiss: () -> Unit,
+    onApply: (String, String) -> Unit,
+) {
+    var from by remember { mutableStateOf(initialFrom) }
+    var to by remember { mutableStateOf(initialTo) }
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        ) {
+            Column(Modifier.padding(20.dp)) {
+                Text("Custom time range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Use Grafana time expressions (now, now-6h, now-1d/d) or millisecond timestamps.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(12.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = from,
+                    onValueChange = { from = it },
+                    label = { Text("From") },
+                    placeholder = { Text("now-6h") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                androidx.compose.material3.OutlinedTextField(
+                    value = to,
+                    onValueChange = { to = it },
+                    label = { Text("To") },
+                    placeholder = { Text("now") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.width(8.dp))
+                    androidx.compose.material3.Button(
+                        onClick = {
+                            val f = from.trim()
+                            val t = to.trim()
+                            if (f.isNotBlank() && t.isNotBlank()) onApply(f, t)
+                        },
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                    ) { Text("Apply") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EditModeBanner(count: Int) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -442,7 +799,7 @@ private fun EditModeBanner() {
             Icon(Icons.Filled.Edit, contentDescription = null, tint = EnergyOrange, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "Reorder mode — use arrows to move panels, then tap ✓ to save to Grafana.",
+                "Editing $count panel${if (count == 1) "" else "s"} — long-press ≡ to drag, use ⋮ to rename/duplicate/delete, ✓ to save to Grafana.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -470,36 +827,504 @@ private fun SaveBanner(message: String) {
     }
 }
 
+/**
+ * A single planned entry in the edited panel list. For existing panels, [sourceId] == [finalId]
+ * and [newType] is null; duplicates keep [sourceId] pointing at the original; fresh panels have
+ * [sourceId] = null and [newType] set.
+ */
+internal data class EditOp(
+    val finalId: Long,
+    val sourceId: Long?,
+    val newType: String?,
+    val newTitle: String?,
+    val w: Int,
+    val h: Int,
+) {
+    fun toRepoOp() = DashboardRepository.LayoutOp(
+        finalId = finalId,
+        sourceId = sourceId,
+        newType = newType,
+        newTitle = newTitle,
+        w = w,
+        h = h,
+    )
+
+    companion object {
+        fun existing(p: Panel) = EditOp(
+            finalId = p.id,
+            sourceId = p.id,
+            newType = null,
+            newTitle = null,
+            w = p.gridW.coerceIn(1, 24),
+            h = p.gridH.coerceIn(1, 40),
+        )
+
+        fun new(finalId: Long, type: String, title: String) = EditOp(
+            finalId = finalId,
+            sourceId = null,
+            newType = type,
+            newTitle = title,
+            w = 12,
+            h = 8,
+        )
+    }
+}
+
+/** Any op whose finalId isn't an original id is added/duplicated; any missing original is deleted; renames/resizes count too. */
+internal fun computeDirtyCount(ops: List<EditOp>, originals: List<Long>, panels: List<Panel>): Int {
+    val originalSet = originals.toSet()
+    val presentSet = ops.map { it.finalId }.toSet()
+    val deletions = originals.count { it !in presentSet }
+    val additions = ops.count { it.finalId !in originalSet }
+    val order = ops.mapNotNull { if (it.sourceId != null && it.sourceId == it.finalId) it.finalId else null }
+    val reordered = order != originals.filter { it in presentSet }
+    val edits = ops.count { op ->
+        val src = op.sourceId?.let { s -> panels.firstOrNull { it.id == s } } ?: return@count false
+        (op.newTitle != null && op.newTitle != src.title) || op.w != src.gridW || op.h != src.gridH
+    }
+    return deletions + additions + edits + (if (reordered) 1 else 0)
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun EditRow(
-    panel: Panel,
+    op: EditOp,
+    previewPanel: Panel?,
     data: PanelData?,
     isFirst: Boolean,
     isLast: Boolean,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onDrag: (Int) -> Unit,
+    onResize: (Int, Int) -> Unit,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    val density = LocalDensity.current
+    val rowHeightPx = with(density) { 220.dp.toPx() }
+    var dragOffset by remember { mutableStateOf(0f) }
+    var dragging by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val displayTitle = op.newTitle ?: previewPanel?.title?.ifBlank { null } ?: "Panel ${op.finalId}"
+    val badgeText = when {
+        op.sourceId == null -> "NEW"
+        op.sourceId != op.finalId -> "COPY"
+        else -> null
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (dragging) EnergyOrange.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (dragging) 6.dp else 1.dp),
     ) {
-        Box(Modifier.weight(1f)) {
-            PanelCard(panel = panel, data = data)
-        }
-        Column {
-            IconButton(onClick = onMoveUp, enabled = !isFirst) {
-                Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up")
+        Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Long-press-and-drag handle.
+                Icon(
+                    Icons.Filled.DragHandle,
+                    contentDescription = "Drag to reorder",
+                    tint = if (dragging) EnergyOrange else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    modifier = Modifier
+                        .size(28.dp)
+                        .pointerInput(op.finalId) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { dragging = true; dragOffset = 0f },
+                                onDragCancel = { dragging = false; dragOffset = 0f },
+                                onDragEnd = {
+                                    val steps = (dragOffset / rowHeightPx).toInt()
+                                    if (steps != 0) onDrag(steps)
+                                    dragging = false; dragOffset = 0f
+                                },
+                                onDrag = { change, drag ->
+                                    change.consume()
+                                    dragOffset += drag.y
+                                    val steps = (dragOffset / rowHeightPx).toInt()
+                                    if (kotlin.math.abs(steps) >= 1) {
+                                        onDrag(steps)
+                                        dragOffset -= steps * rowHeightPx
+                                    }
+                                },
+                            )
+                        },
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    displayTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                if (badgeText != null) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = EnergyOrange.copy(alpha = 0.18f),
+                    ) {
+                        Text(
+                            badgeText,
+                            color = EnergyOrange,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(4.dp))
+                }
+                IconButton(onClick = onMoveUp, enabled = !isFirst, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up", modifier = Modifier.size(18.dp))
+                }
+                IconButton(onClick = onMoveDown, enabled = !isLast, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down", modifier = Modifier.size(18.dp))
+                }
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.MoreVert, contentDescription = "Panel actions", modifier = Modifier.size(20.dp))
+                    }
+                    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Rename") },
+                            leadingIcon = { Icon(Icons.Filled.Title, null) },
+                            onClick = { menuOpen = false; onRename() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Duplicate") },
+                            leadingIcon = { Icon(Icons.Filled.ContentCopy, null) },
+                            onClick = { menuOpen = false; onDuplicate() },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                            leadingIcon = { Icon(Icons.Filled.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                            onClick = { menuOpen = false; onDelete() },
+                        )
+                    }
+                }
             }
-            IconButton(onClick = onMoveDown, enabled = !isLast) {
-                Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down")
+            if (previewPanel != null) {
+                Box(Modifier.fillMaxWidth()) {
+                    PanelCard(panel = previewPanel.copy(title = displayTitle), data = data)
+                }
+            } else {
+                // Placeholder card for a freshly-added panel.
+                Card(
+                    modifier = Modifier.fillMaxWidth().height(96.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = EnergyOrange.copy(alpha = 0.08f)),
+                ) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "New ${op.newType ?: "text"} panel — save to Grafana to configure",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = EnergyOrange,
+                        )
+                    }
+                }
+            }
+            SizeControls(width = op.w, height = op.h, onResize = onResize)
+        }
+    }
+}
+
+private val WIDTH_PRESETS = listOf(6 to "¼", 8 to "⅓", 12 to "½", 16 to "⅔", 18 to "¾", 24 to "Full")
+private val HEIGHT_PRESETS = listOf(6 to "S", 8 to "M", 12 to "L", 16 to "XL", 20 to "XXL")
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SizeControls(width: Int, height: Int, onResize: (Int, Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("W", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            IconButton(
+                onClick = { onResize((width - 1).coerceAtLeast(1), height) },
+                enabled = width > 1,
+                modifier = Modifier.size(28.dp),
+            ) { Text("−", fontWeight = FontWeight.Bold, color = EnergyOrange) }
+            Text(
+                width.toString().padStart(2),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.width(20.dp),
+            )
+            IconButton(
+                onClick = { onResize((width + 1).coerceAtMost(24), height) },
+                enabled = width < 24,
+                modifier = Modifier.size(28.dp),
+            ) { Text("+", fontWeight = FontWeight.Bold, color = EnergyOrange) }
+            WIDTH_PRESETS.forEach { (w, label) ->
+                FilterChip(
+                    selected = width == w,
+                    onClick = { onResize(w, height) },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = EnergyOrange.copy(alpha = 0.18f),
+                        selectedLabelColor = EnergyOrange,
+                    ),
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("H", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+            IconButton(
+                onClick = { onResize(width, (height - 1).coerceAtLeast(1)) },
+                enabled = height > 1,
+                modifier = Modifier.size(28.dp),
+            ) { Text("−", fontWeight = FontWeight.Bold, color = EnergyOrange) }
+            Text(
+                height.toString().padStart(2),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.width(20.dp),
+            )
+            IconButton(
+                onClick = { onResize(width, (height + 1).coerceAtMost(40)) },
+                enabled = height < 40,
+                modifier = Modifier.size(28.dp),
+            ) { Text("+", fontWeight = FontWeight.Bold, color = EnergyOrange) }
+            HEIGHT_PRESETS.forEach { (h, label) ->
+                FilterChip(
+                    selected = height == h,
+                    onClick = { onResize(width, h) },
+                    label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = EnergyOrange.copy(alpha = 0.18f),
+                        selectedLabelColor = EnergyOrange,
+                    ),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RenameDialog(initial: String, onDismiss: () -> Unit, onApply: (String) -> Unit) {
+    var text by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename panel") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                label = { Text("Panel title") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onApply(text) },
+                colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+            ) { Text("Rename") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private data class NewPanelType(val id: String, val label: String, val hint: String)
+
+private val NEW_PANEL_TYPES = listOf(
+    NewPanelType("timeseries", "Time series", "Line chart over time"),
+    NewPanelType("stat", "Stat", "Single big-number reading"),
+    NewPanelType("gauge", "Gauge", "Bounded reading with thresholds"),
+    NewPanelType("bargauge", "Bar gauge", "Horizontal bars per series"),
+    NewPanelType("barchart", "Bar chart", "Categorical column chart"),
+    NewPanelType("piechart", "Pie chart", "Distribution across categories"),
+    NewPanelType("table", "Table", "Rows and columns of raw values"),
+    NewPanelType("heatmap", "Heatmap", "Bucketed density over time"),
+    NewPanelType("state-timeline", "State timeline", "Discrete state changes over time"),
+    NewPanelType("logs", "Logs", "Log lines from Loki or similar"),
+    NewPanelType("text", "Text / Markdown", "Static notes or headings"),
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddPanelSheet(onDismiss: () -> Unit, onPick: (type: String, title: String) -> Unit) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var title by remember { mutableStateOf("New panel") }
+    var pickedType by remember { mutableStateOf(NEW_PANEL_TYPES.first().id) }
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+            Text("Add a panel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "The panel scaffolds a blank definition on Grafana — open it in Grafana to attach queries.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("Title") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            Text("Type", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
+            Spacer(Modifier.height(6.dp))
+            Column {
+                NEW_PANEL_TYPES.forEach { t ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 6.dp),
+                    ) {
+                        FilterChip(
+                            selected = pickedType == t.id,
+                            onClick = { pickedType = t.id },
+                            label = { Text(t.label) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = EnergyOrange.copy(alpha = 0.18f),
+                                selectedLabelColor = EnergyOrange,
+                            ),
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(t.hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { onPick(pickedType, title.trim().ifBlank { "New panel" }) },
+                    colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                ) {
+                    Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Add")
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+    }
+}
+
+/**
+ * Render panels grouped by Grafana row containers. When [groups] is empty (older parse path),
+ * fall back to the flat [fallbackBands] layout.
+ */
+private fun LazyListScope.renderGroupedPanels(
+    groups: List<PanelGroup>,
+    fallbackBands: List<PanelBand>,
+    useGrid: Boolean,
+    panelData: androidx.compose.runtime.snapshots.SnapshotStateMap<Long, PanelData?>,
+    grafanaUrl: String?,
+    dashboardUid: String,
+    collapsedRows: List<String>,
+    onToggleRow: (String) -> Unit,
+    onExpand: (Panel) -> Unit,
+    onCopyLink: (String) -> Unit,
+    onOpenBrowser: (String) -> Unit,
+) {
+    if (groups.isEmpty()) {
+        items(fallbackBands, key = { it.key }) { band ->
+            PanelRow(
+                band = band,
+                panelData = panelData,
+                grafanaUrl = grafanaUrl,
+                dashboardUid = dashboardUid,
+                onExpand = onExpand,
+                onCopyLink = onCopyLink,
+                onOpenBrowser = onOpenBrowser,
+            )
+        }
+        return
+    }
+    groups.forEachIndexed { gIdx, group ->
+        val rowKey = "row_${gIdx}_${group.title ?: "u"}"
+        // Presence in collapsedRows always means "collapsed"; the parent seeds default-collapsed rows on load.
+        val effectiveCollapsed = collapsedRows.contains(rowKey)
+        if (group.title != null) {
+            item(key = "$rowKey.header") {
+                RowHeader(
+                    title = group.title,
+                    count = group.panels.size,
+                    collapsed = effectiveCollapsed,
+                    onToggle = { onToggleRow(rowKey) },
+                )
+            }
+        }
+        if (group.title == null || !effectiveCollapsed) {
+            val bands = groupIntoRows(group.panels, useGrid)
+            items(bands, key = { "$rowKey.${it.key}" }) { band ->
+                PanelRow(
+                    band = band,
+                    panelData = panelData,
+                    grafanaUrl = grafanaUrl,
+                    dashboardUid = dashboardUid,
+                    onExpand = onExpand,
+                    onCopyLink = onCopyLink,
+                    onOpenBrowser = onOpenBrowser,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PanelCard(panel: Panel, data: PanelData?) {
+private fun RowHeader(title: String, count: Int, collapsed: Boolean, onToggle: () -> Unit) {
+    Surface(
+        onClick = onToggle,
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = if (collapsed) "Expand row" else "Collapse row",
+                tint = EnergyOrange,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PanelCard(
+    panel: Panel,
+    data: PanelData?,
+    onExpand: (() -> Unit)? = null,
+    onCopyLink: (() -> Unit)? = null,
+    onOpenBrowser: (() -> Unit)? = null,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
@@ -510,7 +1335,13 @@ private fun PanelCard(panel: Panel, data: PanelData?) {
             val cardW = maxWidth
             val padding = if (cardW < 140.dp) 8.dp else 14.dp
             Column(Modifier.padding(padding)) {
-                PanelHeader(panel = panel, cardWidth = cardW)
+                PanelHeader(
+                    panel = panel,
+                    cardWidth = cardW,
+                    onExpand = onExpand,
+                    onCopyLink = onCopyLink,
+                    onOpenBrowser = onOpenBrowser,
+                )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
                 when {
                     data == null -> PanelLoading()
@@ -524,13 +1355,20 @@ private fun PanelCard(panel: Panel, data: PanelData?) {
 }
 
 @Composable
-private fun PanelHeader(panel: Panel, cardWidth: Dp) {
-    val showTypeBadge = cardWidth >= 180.dp
+private fun PanelHeader(
+    panel: Panel,
+    cardWidth: Dp,
+    onExpand: (() -> Unit)? = null,
+    onCopyLink: (() -> Unit)? = null,
+    onOpenBrowser: (() -> Unit)? = null,
+) {
+    val showTypeBadge = cardWidth >= 220.dp
     val titleStyle = when {
         cardWidth < 120.dp -> MaterialTheme.typography.labelMedium
         cardWidth < 180.dp -> MaterialTheme.typography.titleSmall
         else -> MaterialTheme.typography.titleMedium
     }
+    var menuOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             panel.title.ifBlank { "Panel ${panel.id}" },
@@ -551,6 +1389,36 @@ private fun PanelHeader(panel: Panel, cardWidth: Dp) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
+        if (onExpand != null || onCopyLink != null || onOpenBrowser != null) {
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Panel options", modifier = Modifier.size(18.dp))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    onExpand?.let {
+                        DropdownMenuItem(
+                            text = { Text("Expand fullscreen") },
+                            leadingIcon = { Icon(Icons.Filled.Fullscreen, null) },
+                            onClick = { menuOpen = false; it() },
+                        )
+                    }
+                    onCopyLink?.let {
+                        DropdownMenuItem(
+                            text = { Text("Copy panel link") },
+                            leadingIcon = { Icon(Icons.Filled.Link, null) },
+                            onClick = { menuOpen = false; it() },
+                        )
+                    }
+                    onOpenBrowser?.let {
+                        DropdownMenuItem(
+                            text = { Text("Open in Grafana") },
+                            leadingIcon = { Icon(Icons.Filled.OpenInBrowser, null) },
+                            onClick = { menuOpen = false; it() },
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -558,7 +1426,8 @@ private fun PanelHeader(panel: Panel, cardWidth: Dp) {
 private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
     when (panel.type) {
         "timeseries", "graph" -> TimeseriesPanel(data)
-        "stat", "gauge", "bargauge" -> StatOrGaugePanel(panel, data, cardWidth)
+        "stat", "gauge" -> StatOrGaugePanel(panel, data, cardWidth)
+        "bargauge" -> BarGaugePanel(panel, data)
         "table" -> TablePanel(data)
         "barchart" -> BarChartPanel(data)
         "piechart" -> PieChartPanel(data)
@@ -740,6 +1609,64 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun BarGaugePanel(panel: Panel, data: PanelData) {
+    // Each series -> one row: label + horizontal bar + reduced value.
+    val calc = remember(panel.options) {
+        val reduce = panel.options?.get("reduceOptions") as? kotlinx.serialization.json.JsonObject
+        val calcs = reduce?.get("calcs") as? kotlinx.serialization.json.JsonArray
+        (calcs?.firstOrNull() as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "lastNotNull"
+    }
+    // Prefer series (already labeled); fall back to bar-pair extraction for table-shaped frames.
+    val rows: List<Pair<String, Double>> = remember(data, calc) {
+        val fromSeries = data.series.mapNotNull { s ->
+            val v = reduceStat(s.values.filterNotNull(), calc) ?: return@mapNotNull null
+            (s.name.ifBlank { "value" }) to v
+        }
+        if (fromSeries.isNotEmpty()) fromSeries else extractBarPairs(data)
+    }
+    if (rows.isEmpty()) { PanelNoData(); return }
+    // Bar range: percent units use 0..100; otherwise scale to max value.
+    val isPercent = panel.unit?.startsWith("percent") == true
+    val maxVal = if (isPercent) 100.0 else (rows.maxOf { it.second }.takeIf { it > 0 } ?: 1.0)
+    Column(Modifier.fillMaxWidth()) {
+        rows.take(12).forEach { (label, v) ->
+            val frac = (v / maxVal).coerceIn(0.0, 1.0).toFloat()
+            val display = formatValue(v, panel.unit, panel.decimals)
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = true),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        display,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = EnergyOrange,
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.height(3.dp))
+                Box(
+                    Modifier.fillMaxWidth().height(10.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
+                ) {
+                    Box(
+                        Modifier.fillMaxWidth(frac).height(10.dp)
+                            .background(EnergyOrange, RoundedCornerShape(4.dp))
+                    )
+                }
+            }
+        }
     }
 }
 
