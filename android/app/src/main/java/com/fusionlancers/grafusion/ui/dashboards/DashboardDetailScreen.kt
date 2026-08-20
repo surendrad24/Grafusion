@@ -91,6 +91,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -113,6 +114,7 @@ import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.data.model.Alert
 import com.fusionlancers.grafusion.data.model.AlertState
+import com.fusionlancers.grafusion.data.model.Dashboard
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.PanelGroup
@@ -1353,7 +1355,7 @@ private fun PanelCard(
                     onOpenBrowser = onOpenBrowser,
                 )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
-                val selfLoads = panel.type == "alertlist"
+                val selfLoads = panel.type == "alertlist" || panel.type == "dashlist"
                 when {
                     selfLoads -> PanelBody(panel = panel, data = data ?: PanelData(emptyList()), cardWidth = cardW)
                     data == null -> PanelLoading()
@@ -1449,6 +1451,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "text" -> TextPanel(panel)
         "geomap", "worldmap-panel" -> GeomapPanel(data)
         "alertlist" -> AlertListPanel(panel)
+        "dashlist" -> DashListPanel(panel)
         else -> UnsupportedPanel(panel.type, null)
     }
 }
@@ -2006,6 +2009,87 @@ private fun AlertListRow(alert: Alert) {
             color = dot,
             fontWeight = FontWeight.SemiBold,
         )
+    }
+}
+
+@Composable
+private fun DashListPanel(panel: Panel) {
+    val container = LocalAppContainer.current
+    val options = panel.options
+    val maxItems = (options?.get("maxItems") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content?.toIntOrNull() ?: 10
+    val showStarred = (options?.get("showStarred") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content?.toBooleanStrictOrNull() ?: true
+    val query = ((options?.get("query") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content).orEmpty().trim().lowercase()
+    val tagFilter = remember(options) {
+        (options?.get("tags") as? kotlinx.serialization.json.JsonArray)
+            ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
+            ?.map { it.lowercase() }
+            .orEmpty()
+    }
+
+    if (container == null) { PanelError("No account context"); return }
+    val dashboards by container.dashboardRepository.dashboards.collectAsState(initial = emptyList())
+
+    val filtered = remember(dashboards, showStarred, query, tagFilter, maxItems) {
+        dashboards
+            .asSequence()
+            .filter { if (showStarred) it.isStarred else true }
+            .filter { if (query.isEmpty()) true else it.title.lowercase().contains(query) }
+            .filter { d ->
+                if (tagFilter.isEmpty()) true
+                else d.tags.map { it.lowercase() }.any { it in tagFilter }
+            }
+            .take(maxItems)
+            .toList()
+    }
+
+    if (filtered.isEmpty()) {
+        Text(
+            "No dashboards match this list.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        )
+        return
+    }
+    Column(Modifier.fillMaxWidth()) {
+        filtered.forEach { d -> DashListRow(d) }
+    }
+}
+
+@Composable
+private fun DashListRow(d: Dashboard) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (d.isStarred) Icons.Filled.Star else Icons.Filled.StarBorder,
+            contentDescription = null,
+            tint = if (d.isStarred) EnergyOrange else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                d.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!d.folderTitle.isNullOrBlank()) {
+                Text(
+                    d.folderTitle,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    maxLines = 1,
+                )
+            }
+        }
     }
 }
 
