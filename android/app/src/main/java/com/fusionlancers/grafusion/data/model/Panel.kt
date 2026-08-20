@@ -2,7 +2,7 @@ package com.fusionlancers.grafusion.data.model
 
 import kotlinx.serialization.json.JsonObject
 
-/** A group of panels — either an ungrouped run (title=null) or a Grafana row (title + collapsed). */
+/** A group of panels - either an ungrouped run (title=null) or a Grafana row (title + collapsed). */
 data class PanelGroup(
     val title: String?,
     val collapsed: Boolean,
@@ -26,7 +26,7 @@ data class Panel(
     val options: JsonObject? = null,
 )
 
-/** One time-series returned by /api/ds/query — timestamps aligned with values. */
+/** One time-series returned by /api/ds/query - timestamps aligned with values. */
 data class Series(
     val name: String,
     val timestamps: List<Long>,

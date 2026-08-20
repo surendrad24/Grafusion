@@ -195,7 +195,7 @@ class DashboardRepository(
         }
 
         val rewrittenPanels = buildJsonArray {
-            // Preserve row containers first — savePanelOrder never touched their nested panels either.
+            // Preserve row containers first - savePanelOrder never touched their nested panels either.
             rowContainers.forEach { add(it) }
             placements.forEach { placed ->
                 val op = placed.op
@@ -238,7 +238,7 @@ class DashboardRepository(
         put("options", buildJsonObject {
             if (op.newType == "text") {
                 put("mode", JsonPrimitive("markdown"))
-                put("content", JsonPrimitive("_New text panel — edit in Grafana._"))
+                put("content", JsonPrimitive("_New text panel - edit in Grafana._"))
             }
         })
         put("fieldConfig", buildJsonObject {

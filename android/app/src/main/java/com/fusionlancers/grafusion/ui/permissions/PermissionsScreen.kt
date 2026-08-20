@@ -103,7 +103,7 @@ fun PermissionsScreen(onBack: () -> Unit) {
         ) {
             item {
                 Text(
-                    "Grafusion delivers push alerts through your Grafana webhook relay. Grant these permissions so alerts reach you reliably — even at night or during battery saver.",
+                    "Grafusion delivers push alerts through your Grafana webhook relay. Grant these permissions so alerts reach you reliably - even at night or during battery saver.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
                 )
@@ -262,7 +262,7 @@ private fun openBatteryOptimizationSettings(context: Context) {
         .setData(Uri.parse("package:${context.packageName}"))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     runCatching { context.startActivity(intent) }.onFailure {
-        // Some OEMs block the direct request — fall back to the list screen.
+        // Some OEMs block the direct request - fall back to the list screen.
         context.startActivity(
             Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

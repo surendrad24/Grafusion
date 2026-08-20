@@ -47,7 +47,7 @@ class AlertRepository(
         if (!resp.isSuccessful) {
             val hint = when (resp.code()) {
                 401, 403 -> "your Grafana user lacks alert-silence permission (Editor or Admin required)"
-                404 -> "silence endpoint not found — Grafana Alertmanager may be disabled"
+                404 -> "silence endpoint not found - Grafana Alertmanager may be disabled"
                 else -> "HTTP ${resp.code()}"
             }
             error(hint)

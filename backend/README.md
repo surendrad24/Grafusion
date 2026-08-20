@@ -12,11 +12,11 @@ Receives Grafana alert webhooks and forwards them to registered mobile devices v
 
 ## Endpoints
 
-- `POST /v1/devices` — register/refresh an FCM token
+- `POST /v1/devices` - register/refresh an FCM token
   ```json
   { "fcm_token": "...", "grafana_url": "https://grafana.example.com", "grafana_user": "alice" }
   ```
-- `POST /v1/webhook/grafana` — configure this URL as a Grafana webhook contact point
+- `POST /v1/webhook/grafana` - configure this URL as a Grafana webhook contact point
 - `GET  /healthz`
 
 ## Run

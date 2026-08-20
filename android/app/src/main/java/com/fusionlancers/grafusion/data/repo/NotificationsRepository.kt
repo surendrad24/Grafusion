@@ -13,7 +13,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
  *
  * The relay's /v1/devices endpoint expects {fcm_token, grafana_url, grafana_user}. Until
  * Firebase is provisioned we use the stable device_id from NotificationPreferences as the
- * fcm_token — the relay treats it as an opaque routing key. Real FCM tokens will replace it
+ * fcm_token - the relay treats it as an opaque routing key. Real FCM tokens will replace it
  * transparently once GrafusionMessagingService is wired.
  */
 class NotificationsRepository(

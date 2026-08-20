@@ -11,7 +11,7 @@ data class DashboardEntity(
     val folderTitle: String? = null,
     val folderUid: String? = null,
     val tags: String = "",
-    /** Grafana numeric id — required by /api/user/stars/dashboard/{id}. */
+    /** Grafana numeric id - required by /api/user/stars/dashboard/{id}. */
     val dashboardId: Long? = null,
     val isStarred: Boolean = false,
     /** Cached raw JSON of the full dashboard for offline viewing. */

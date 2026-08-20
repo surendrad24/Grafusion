@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/brand/png/grafusion-wordmark-horizontal.png" alt="Grafusion — Grafana mobile client by Fusionlancers" width="520">
+  <img src="assets/brand/png/grafusion-wordmark-horizontal.png" alt="Grafusion - Grafana mobile client by Fusionlancers" width="520">
 </p>
 
-<h1 align="center">Grafusion — Mobile Dashboards for Grafana</h1>
+<h1 align="center">Grafusion - Mobile Dashboards for Grafana</h1>
 
 <p align="center">
-  A native Android (and soon iOS) client for self-hosted Grafana — dashboards, panels, alerts and on-call, without a browser.
+  A native Android (and soon iOS) client for self-hosted Grafana - dashboards, panels, alerts and on-call, without a browser.
 </p>
 
 <p align="center">
@@ -21,91 +21,141 @@
 **Grafusion** is an open-source mobile and tablet client for **self-hosted Grafana**, built by
 [Fusionlancers Technologies Pvt. Ltd.](https://fusionlancers.com/). It targets teams who run
 their own Grafana stack and want first-class mobile access to their dashboards, panels, alerts
-and on-call surfaces — without going through a browser or paying for Grafana Cloud Mobile.
+and on-call surfaces - without going through a browser or paying for Grafana Cloud Mobile.
 
-The Android app is native (Kotlin + Jetpack Compose + Vico charts). A small Go relay is planned
-to power push notifications and background sync for OSS Grafana users who don't have an on-prem
-push gateway.
+The Android app is native (Kotlin + Jetpack Compose + Vico charts). A Go relay in `backend/`
+receives Grafana Alertmanager webhooks and forwards them to devices via FCM for OSS users who
+don't have an on-prem push gateway.
 
-## Currently implemented (v0.1)
+## Currently implemented
 
-The Android app is a working preview against a self-hosted Grafana instance. What is landed today:
+The Android app runs against any self-hosted Grafana instance today. What is shipped:
 
-### Accounts
+### Accounts & security
 - Multi-account: add and switch between multiple Grafana instances.
-- Auth: username/password *and* API token (`Bearer`) — pick per account.
-- Credentials are stored in `EncryptedSharedPreferences` (AES-256-GCM master key).
+- Auth: username/password **or** API token (`Bearer`) - pick per account.
+- Credentials stored in `EncryptedSharedPreferences` (AES-256-GCM master key).
 - `/api/user` used to verify credentials on add.
+- **App lock**: optional PIN (PBKDF2-hashed) + `BiometricPrompt` fingerprint gate on launch.
+- Runtime **permissions onboarding** screen for `POST_NOTIFICATIONS` (Android 13+).
 
 ### Dashboards
-- Browse dashboards via `/api/search` (folders, tags, favorites-friendly).
-- Room-backed offline cache of the dashboard list per account.
-- Open a dashboard — panels are parsed from Grafana JSON (`/api/dashboards/uid/{uid}`),
-  including one level of collapsed row containers and panels missing an `id` field (synthetic
-  fallback IDs so nothing gets silently dropped).
-- Responsive layout: on tablets (>600 dp wide) panels honor their `gridPos` and render
-  **side-by-side** exactly like the Grafana web grid. On phones they stack.
-- **Auto-refresh** selector in the top bar: Off / 5 s / 10 s / 30 s / 1 min / 5 min / 15 min.
-- Time range selector: last 15 min / 1 h / 6 h / 24 h / 7 d.
+- Browse via `/api/search` with **search bar**, **folder chips**, **starred filter** and
+  **pull-to-refresh**.
+- Room-backed **offline cache** of the dashboard list per account - the app is usable without
+  network.
+- Open a dashboard - panels parsed from `/api/dashboards/uid/{uid}`, including one level of
+  row containers and panels missing an `id` (synthetic IDs so nothing gets silently dropped).
+- Responsive layout: on tablets (>600 dp) panels honor their `gridPos` and render
+  **side-by-side** exactly like the Grafana web grid; phones stack.
+- **Auto-refresh** in the top bar: Off / 5 s / 10 s / 30 s / 1 min / 5 min / 15 min.
+- **Time-range selector**: last 15 min / 1 h / 6 h / 24 h / 7 d.
+- **Row collapse / expand** with `type=row` headers preserved from the dashboard JSON.
+
+### Dashboard edit mode
+Tap the pencil to enter an in-place editor that persists back through
+`/api/dashboards/db?overwrite=true`:
+
+- **Long-press drag** to reorder panels within a row.
+- **Resize** via w/h steppers and preset chips (half / full / quarter).
+- **Rename** panels inline.
+- **Duplicate** or **delete** panels from a per-panel menu.
+- **Add panel** bottom sheet - pick from all supported renderer types.
+- Dirty-count badge on the save icon; discard confirm on close when unsaved.
 
 ### Panel renderers (native, no WebView)
 Each dashboard runs `/api/ds/query` and native Compose renderers draw the results:
-- **timeseries / graph** — Vico line chart, multi-series with a legend and unit-aware axes.
-- **stat / gauge** — big number + label, with unit + decimals from `fieldConfig`.
-- **barchart** — Vico column chart.
-- **table** — horizontally-scrollable table with a sticky header, all columns preserved from the
-  raw DataFrame (numeric + string).
-- **logs** — auto-detects the `Line` / `Body` field and renders a scrollable log view.
-- **row** — collapsible/flat row grouping.
-- Unsupported types (e.g. geomap, text) fall through to a labeled placeholder instead of
-  breaking the whole dashboard.
+
+- **timeseries / graph** - Vico line chart, multi-series with legend and unit-aware axes.
+- **stat / gauge** - big number + label, unit + decimals from `fieldConfig`.
+- **bargauge** - horizontal bar-gauge for multi-metric summaries.
+- **barchart** - Vico column chart.
+- **piechart** - donut / pie with legend.
+- **heatmap** - bucketed 2D heatmap.
+- **state-timeline / status-history** - per-series state bands over time.
+- **table** - horizontally-scrollable, sticky-header, all columns preserved from the raw
+  DataFrame (numeric + string).
+- **logs** - auto-detects `Line` / `Body` field, scrollable log view.
+- **text** - markdown/plain text panels.
+- **geomap / worldmap-panel** - map with pinned points (MapLibre-style renderer).
+- **row** - collapsible / flat row grouping.
+- Unsupported types fall through to a labeled placeholder instead of breaking the dashboard.
 
 ### Alerts
-- Consumes `/api/v1/provisioning/alert-rules` and grouped state via `/api/alertmanager/*`.
+- Live alert list backed by Grafana **Alertmanager v2** (`/api/alertmanager/*`) plus
+  provisioning rules from `/api/v1/provisioning/alert-rules`.
 - Firing / Pending / Normal state indicators.
+- **Tap an alert** for a detail sheet with labels, annotations and the source rule.
+- **Silence from mobile** for 30 minutes / 2 hours / 24 hours.
+
+### Push notifications (backend relay)
+`backend/` is a Go service that turns Grafana Alertmanager webhooks into FCM pushes:
+
+- `POST /v1/devices` - register/refresh an FCM token per (account, device).
+- `POST /v1/webhook/grafana` - webhook contact point receiver.
+- SQLite-backed device registry; noop-mode when `FCM_CREDENTIALS_JSON` is unset (dev-friendly).
+- Dockerfile included.
 
 ### App shell
 - Material 3 dark & light theming (system-aware, or user-forced Dark / Light).
-- Splash: gradient background, logo, wordmark, tagline and version — renders instantly from an
+- Splash: gradient background, logo, wordmark, tagline, version - renders instantly from an
   XML layout so it doesn't get eaten by Compose's first-frame cost.
 - Foldable/tablet-aware navigation: side rail on wide screens, bottom bar on phones.
 
-## Roadmap — native feature milestones
+## Roadmap
 
 Modeled after Grafana Cloud Mobile + Grafana OnCall to give self-hosted users the same
 experience natively.
 
-| # | Milestone | Highlights |
-|---|---|---|
-| **M1** | Dashboard essentials *(shipped in v0.1)* | Search, open, native panel rendering, side-by-side layout, auto-refresh |
-| **M2** | Explore & alerts polish | Ad-hoc query view (`/api/ds/query` with Prometheus/Loki/InfluxDB pickers), alert rule detail, silence / mute from mobile |
-| **M3** | Push notifications | Go relay (`backend/`) subscribes to Grafana Alertmanager webhooks, forwards to FCM, per-account topics, quiet hours |
-| **M4** | On-call | Grafana OnCall schedule view, current on-call badge, acknowledge / resolve incidents |
-| **M5** | Full panel coverage | canvas, geomap (MapLibre), state timeline, status history, heatmap, pie chart, alert list panel |
-| **M6** | Editing & sharing | Move / resize panels from the tablet, save dashboard variants, share panel snapshots as PNG |
+| # | Milestone | Status | Highlights |
+|---|---|---|---|
+| **M1** | Dashboard essentials | shipped | Search, open, native panel rendering, side-by-side layout, auto-refresh |
+| **M2** | Dashboard polish | shipped | Search / star / folder chips, pull-to-refresh, expanded panel renderer coverage |
+| **M3** | Panel editing | shipped | Move / resize / rename / duplicate / delete, add panel, row collapse |
+| **M4** | Alerts + push + security | shipped | Live Alertmanager list, silence 30m/2h/24h, Go relay -> FCM, biometric app lock, offline cache |
+| **M5** | On-call | planned | Grafana OnCall schedule view, current on-call badge, acknowledge / resolve incidents |
+| **M6** | Explore & sharing | planned | Ad-hoc `/api/ds/query` view, share panel snapshots as PNG, dashboard variants |
 
 ## Architecture
 
 ```
-android/         — Kotlin + Jetpack Compose app
-  data/          — Room DB, retrofit API, DataStore prefs, EncryptedSharedPreferences vault
-  ui/            — Compose screens (dashboards, alerts, accounts, splash)
-backend/         — Go relay: Alertmanager webhook receiver → FCM (planned, M3)
+android/         - Kotlin + Jetpack Compose app
+  data/
+    db/          - Room DAOs (dashboard cache, ...)
+    prefs/       - DataStore + EncryptedSharedPreferences (theme, app lock, notifications)
+    repo/        - Grafana API repos: Account, Dashboard, Alert, Notifications, PanelParser
+    model/       - Panel, PanelGroup, Series, RawFrame, ...
+  ui/
+    accounts/    - add / switch / delete Grafana accounts
+    alerts/      - alert list + detail sheet + silence controls
+    dashboards/  - list + detail + edit mode + native panel renderers
+    lock/        - PIN + biometric unlock gate
+    permissions/ - runtime permissions onboarding
+    nav/         - adaptive scaffold (rail / bottom bar)
+    splash/, theme/, auth/
+backend/         - Go relay: Alertmanager webhook -> FCM (SQLite device registry)
+  cmd/relay/     - entrypoint
+  internal/      - HTTP handlers, storage, FCM client
 ```
 
 Non-obvious constraints worth knowing before hacking:
 
 - Android build requires **JDK 17** (Android Gradle Plugin 8.x is incompatible with JDK 25).
   Run gradle with `JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew ...`.
-- Grafana panels sometimes come back without an `id` field (Security dashboards especially) —
+- Grafana panels sometimes come back without an `id` field (Security dashboards especially) -
   parser assigns synthetic IDs so the dashboard still renders.
-- Compose cold-start on mid-range Android devices drops ~1.6 s of frames — that's why the
+- `BiometricPrompt` requires the host activity to be a `FragmentActivity`, not a plain
+  `ComponentActivity` - `MainActivity` extends `FragmentActivity` for that reason.
+- Compose cold-start on mid-range Android devices drops ~1.6 s of frames - that's why the
   splash is a plain XML `Activity`, not a Compose overlay.
+- Dashboard edit persistence uses `/api/dashboards/db` with `overwrite=true`; row containers
+  are round-tripped verbatim so nested layouts survive save.
 
 ## Getting started (development)
 
+### Android app
+
 ```bash
-# Clone
 git clone https://github.com/surendrad24/Grafusion.git
 cd Grafusion/android
 
@@ -116,29 +166,40 @@ JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :app:assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Then launch the app, tap **Accounts → Add**, and point it at your Grafana URL with either
+Launch the app, tap **Accounts -> Add**, and point it at your Grafana URL with either
 username/password or an API token.
+
+### Push relay (optional, for M4 push)
+
+```bash
+cd backend
+go run ./cmd/relay
+```
+
+Then in Grafana: **Alerting -> Contact points -> New -> Webhook**, URL
+`https://your-relay.example.com/v1/webhook/grafana`, attach it to a notification policy.
+See `backend/README.md` for env vars.
 
 ## Screenshots
 
-_Coming soon — will be added under `docs/images/` once the M1 UI stabilizes._
+_Coming soon - will be added under `docs/images/` once the M5 UI stabilizes._
 
 ## Branding
 
-The Grafusion identity uses an original **Data Fusion Node** symbol — a geometric "G" combining
+The Grafusion identity uses an original **Data Fusion Node** symbol - a geometric "G" combining
 a rounded orbit with a sharp data path. The mark does not reproduce Grafana's logo.
 
 Primary colors:
 
-- Fusion Navy — `#0B1739`
-- Fusion Blue — `#142B5F`
-- Energy Orange — `#FF8A00`
-- Data Purple — `#7C3AED`
+- Fusion Navy - `#0B1739`
+- Fusion Blue - `#142B5F`
+- Energy Orange - `#FF8A00`
+- Data Purple - `#7C3AED`
 
 ## Contributing
 
 Bug reports, dashboards that don't render correctly, and pull requests are all welcome.
-For dashboards that don't render, please include the panel JSON (right-click → Inspect →
+For dashboards that don't render, please include the panel JSON (right-click -> Inspect ->
 Panel JSON in Grafana) so we can add a fixture.
 
 ## Trademark notice
@@ -148,10 +209,10 @@ client and is not endorsed by or affiliated with Grafana Labs.
 
 ## License
 
-Copyright © 2026 **Fusionlancers Technologies Pvt. Ltd.**
+Copyright (c) 2026 **Fusionlancers Technologies Pvt. Ltd.**
 
 Add a formal software license (Apache-2.0 recommended) before accepting external contributions.
 
 ## Company
 
-Built by **Fusionlancers Technologies Pvt. Ltd.** — https://fusionlancers.com/
+Built by **Fusionlancers Technologies Pvt. Ltd.** - https://fusionlancers.com/

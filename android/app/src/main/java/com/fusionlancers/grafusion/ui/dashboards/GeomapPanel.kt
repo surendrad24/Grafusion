@@ -79,7 +79,7 @@ private data class AttackPoint(val lat: Double, val lon: Double, val weight: Dou
 private fun extractPoints(data: PanelData): List<AttackPoint> {
     val out = mutableListOf<AttackPoint>()
     for (frame in data.frames) {
-        // Case A: Prometheus format=table + instant=true — one frame per label combo.
+        // Case A: Prometheus format=table + instant=true - one frame per label combo.
         // Labels are on the value field's metadata, values in the number column.
         val valueIdx = frame.fieldTypes.indexOfFirst { it == "number" }
         if (valueIdx >= 0 && frame.fieldLabels.getOrNull(valueIdx)?.isNotEmpty() == true) {

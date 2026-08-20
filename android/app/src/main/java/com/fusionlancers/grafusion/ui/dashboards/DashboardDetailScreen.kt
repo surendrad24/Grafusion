@@ -799,7 +799,7 @@ private fun EditModeBanner(count: Int) {
             Icon(Icons.Filled.Edit, contentDescription = null, tint = EnergyOrange, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text(
-                "Editing $count panel${if (count == 1) "" else "s"} — long-press ≡ to drag, use ⋮ to rename/duplicate/delete, ✓ to save to Grafana.",
+                "Editing $count panel${if (count == 1) "" else "s"} - long-press ≡ to drag, use ⋮ to rename/duplicate/delete, ✓ to save to Grafana.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
             )
@@ -1018,7 +1018,7 @@ private fun EditRow(
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(
-                            "New ${op.newType ?: "text"} panel — save to Grafana to configure",
+                            "New ${op.newType ?: "text"} panel - save to Grafana to configure",
                             style = MaterialTheme.typography.bodySmall,
                             color = EnergyOrange,
                         )
@@ -1163,7 +1163,7 @@ private fun AddPanelSheet(onDismiss: () -> Unit, onPick: (type: String, title: S
             Text("Add a panel", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
             Text(
-                "The panel scaffolds a blank definition on Grafana — open it in Grafana to attach queries.",
+                "The panel scaffolds a blank definition on Grafana - open it in Grafana to attach queries.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
@@ -1591,7 +1591,7 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
     val values = if (seriesValues.isNotEmpty()) seriesValues else frameValues
     val latest = reduceStat(values, calc)
     val display = when {
-        latest == null -> "—"
+        latest == null -> "-"
         else -> formatValue(latest, panel.unit, panel.decimals)
     }
     // Scale value font to fit narrow cards without letter-wrapping.
@@ -1697,7 +1697,7 @@ private fun TablePanel(data: PanelData) {
                 for (c in frame.columns.indices) {
                     val cell = frame.columns[c].getOrNull(r)
                     val text = when (cell) {
-                        null -> "—"
+                        null -> "-"
                         is Number -> if (frame.fieldTypes.getOrNull(c) == "time") {
                             SimpleDateFormat("MMM dd HH:mm:ss", Locale.getDefault()).format(Date(cell.toLong()))
                         } else "%.2f".format(cell.toDouble())
@@ -1885,7 +1885,7 @@ private fun TextPanel(panel: Panel) {
     )
 }
 
-/** Best-effort strip of markdown/html to plain text — mobile card is too narrow for real rendering. */
+/** Best-effort strip of markdown/html to plain text - mobile card is too narrow for real rendering. */
 private fun renderTextPanel(content: String, mode: String): String {
     var s = content
     if (mode.equals("html", true)) {
@@ -1920,7 +1920,7 @@ private fun UnsupportedPanel(type: String, message: String?) {
         )
         Spacer(Modifier.size(8.dp))
         Text(
-            message ?: "Panel type '$type' is not natively rendered yet — open in browser to view.",
+            message ?: "Panel type '$type' is not natively rendered yet - open in browser to view.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
         )

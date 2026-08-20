@@ -370,7 +370,7 @@ private fun LoadingState() {
 @Composable
 private fun EmptyState(filter: AlertFilter) {
     val label = when (filter) {
-        AlertFilter.All -> "No alerts — everything looks healthy."
+        AlertFilter.All -> "No alerts - everything looks healthy."
         AlertFilter.Firing -> "No firing alerts right now."
         AlertFilter.Pending -> "No pending alerts."
         AlertFilter.Suppressed -> "No suppressed alerts."

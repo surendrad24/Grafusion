@@ -33,7 +33,7 @@ class AccountRepository(
      * Verify credentials against Grafana with HTTP Basic auth by fetching /api/user,
      * then persist the credentials encrypted so future requests can reuse them.
      *
-     * Works with every Grafana version and every role (Viewer/Editor/Admin) —
+     * Works with every Grafana version and every role (Viewer/Editor/Admin) -
      * unlike POST /api/auth/keys which is Admin-only and removed in Grafana 11.
      */
     suspend fun loginWithPassword(baseUrl: String, username: String, password: String): Result<Unit> = runCatching {
