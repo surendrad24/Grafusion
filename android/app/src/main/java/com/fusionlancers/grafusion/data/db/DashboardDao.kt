@@ -17,6 +17,14 @@ interface DashboardDao {
     @Query("UPDATE dashboards SET detailJson = :json, updatedAt = :ts WHERE accountId = :accountId AND uid = :uid")
     suspend fun updateDetail(accountId: Long, uid: String, json: String, ts: Long = System.currentTimeMillis())
 
+    @Query("SELECT detailJson FROM dashboards WHERE accountId = :accountId AND uid = :uid LIMIT 1")
+    suspend fun detailJsonFor(accountId: Long, uid: String): String?
+
+    @Query("SELECT uid, detailJson FROM dashboards WHERE accountId = :accountId AND detailJson IS NOT NULL")
+    suspend fun cachedDetailPairs(accountId: Long): List<UidJson>
+
+    data class UidJson(val uid: String, val detailJson: String)
+
     @Query("UPDATE dashboards SET isStarred = :starred WHERE accountId = :accountId AND uid = :uid")
     suspend fun updateStar(accountId: Long, uid: String, starred: Boolean)
 

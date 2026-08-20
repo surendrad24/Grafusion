@@ -25,7 +25,11 @@ import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.NotificationsPaused
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Schedule
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -227,7 +231,26 @@ private fun AlertSheet(alert: Alert, onSilence: (Long) -> Unit, onDismiss: () ->
             SilenceButton("2h", onSilence, 120)
             SilenceButton("24h", onSilence, 1440)
         }
-        Spacer(Modifier.height(12.dp))
+        if (!alert.generatorURL.isNullOrBlank()) {
+            val context = LocalContext.current
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(alert.generatorURL))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.OpenInBrowser, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("Open in Grafana")
+            }
+        }
+        Spacer(Modifier.height(8.dp))
         OutlinedButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text("Close") }
         Spacer(Modifier.height(8.dp))
     }

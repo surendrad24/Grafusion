@@ -25,6 +25,7 @@ import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import com.fusionlancers.grafusion.ui.permissions.PermissionsScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
 
@@ -112,7 +113,13 @@ private fun AppNavHost(
             AlertsScreen(container = container)
         }
         composable(TopDest.Accounts.route) {
-            AccountsScreen(container = container)
+            AccountsScreen(
+                container = container,
+                onOpenPermissions = { navController.navigate("permissions") },
+            )
+        }
+        composable("permissions") {
+            PermissionsScreen(onBack = { navController.popBackStack() })
         }
     }
 }

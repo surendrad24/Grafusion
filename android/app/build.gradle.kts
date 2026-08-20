@@ -79,6 +79,9 @@ dependencies {
     // Encrypted storage
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
 
+    // Biometric auth
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
