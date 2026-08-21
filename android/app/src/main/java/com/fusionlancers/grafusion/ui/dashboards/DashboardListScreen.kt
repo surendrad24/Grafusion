@@ -1,6 +1,5 @@
 package com.fusionlancers.grafusion.ui.dashboards
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,10 +12,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items as lazyRowItems
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -52,7 +53,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -117,6 +117,14 @@ fun DashboardListScreen(
     val grouped = remember(filtered) {
         filtered.groupBy { it.folderTitle ?: "General" }
             .toSortedMap()
+    }
+
+    // Only show the horizontal Starred rail on the unfiltered "All" view; when the user is
+    // already filtering by Starred (or any other chip) the rail would just duplicate the grid.
+    val starredRail = remember(dashboards, filter, query) {
+        if (filter is DashFilter.All && query.isBlank()) {
+            dashboards.filter { it.isStarred }
+        } else emptyList()
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -228,6 +236,17 @@ fun DashboardListScreen(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    if (starredRail.isNotEmpty()) {
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "starred-hdr") {
+                            StarredRailHeader(starredRail.size)
+                        }
+                        item(span = { GridItemSpan(maxLineSpan) }, key = "starred-rail") {
+                            StarredRail(
+                                items = starredRail,
+                                onOpen = { d -> onOpenDashboard(d.uid, d.title) },
+                            )
+                        }
+                    }
                     grouped.forEach { (folder, items) ->
                         item(span = { GridItemSpan(maxLineSpan) }, key = "hdr-$folder") {
                             FolderHeader(folder, items.size)
@@ -263,6 +282,86 @@ private fun FilterChipItem(label: String, selected: Boolean, onClick: () -> Unit
             selectedLabelColor = EnergyOrange,
         ),
     )
+}
+
+@Composable
+private fun StarredRailHeader(count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.Star,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = EnergyOrange,
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            "Starred",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f),
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            "$count",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+        )
+    }
+}
+
+@Composable
+private fun StarredRail(items: List<Dashboard>, onOpen: (Dashboard) -> Unit) {
+    LazyRow(
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        lazyRowItems(items, key = { it.uid }) { d ->
+            StarredTile(dashboard = d, onClick = { onOpen(d) })
+        }
+    }
+}
+
+@Composable
+private fun StarredTile(dashboard: Dashboard, onClick: () -> Unit) {
+    Card(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.size(width = 170.dp, height = 92.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Star,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = EnergyOrange,
+                )
+                Spacer(Modifier.size(6.dp))
+                dashboard.folderTitle?.let { folder ->
+                    Text(
+                        folder,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        maxLines = 1,
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                dashboard.title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+            )
+        }
+    }
 }
 
 @Composable
