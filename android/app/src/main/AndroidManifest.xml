@@ -49,5 +49,17 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="grafusion_alerts" />
+
+        <receiver
+            android:name=".widget.AlertsWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_alerts_description">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_alerts_info" />
+        </receiver>
     </application>
 </manifest>

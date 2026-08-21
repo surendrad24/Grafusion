@@ -113,6 +113,9 @@ class AppContainer(context: Context) {
     /** Set by MainActivity when opened via a notification tap; consumed by AlertsScreen. */
     val pendingAlertDeepLink = MutableStateFlow<AlertDeepLink?>(null)
 
+    /** Set by MainActivity from external launchers (e.g. home-screen widget) to force a tab. */
+    val pendingStartRoute = MutableStateFlow<String?>(null)
+
     /**
      * Session-scoped guard so we auto-open the home dashboard at most once per process launch.
      * Flipped by DashboardListScreen after it fires the first navigation.

@@ -15,4 +15,6 @@
     <string name="login_username_hint">Username</string>
     <string name="login_password_hint">Password</string>
     <string name="login_button">Sign in</string>
+
+    <string name="widget_alerts_description">Grafana firing-alert count</string>
 </resources>

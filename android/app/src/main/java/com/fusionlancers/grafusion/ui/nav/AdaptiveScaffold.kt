@@ -57,6 +57,14 @@ fun AdaptiveScaffold(
         }
     }
 
+    // Widget / external launcher hint: jump straight to the requested top-level tab.
+    val pendingRoute by container.pendingStartRoute.collectAsState()
+    LaunchedEffect(pendingRoute) {
+        val target = pendingRoute ?: return@LaunchedEffect
+        if (currentRoute != target) navController.navigateSingleTop(target)
+        container.pendingStartRoute.value = null
+    }
+
     if (useNavRail) {
         Row(Modifier.fillMaxSize()) {
             NavigationRail {

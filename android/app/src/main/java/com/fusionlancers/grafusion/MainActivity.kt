@@ -39,6 +39,9 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun publishDeepLink(container: AppContainer, intent: Intent?) {
+        intent?.getStringExtra(EXTRA_OPEN_ROUTE)?.takeIf { it.isNotBlank() }?.let {
+            container.pendingStartRoute.value = it
+        }
         val fingerprint = intent?.getStringExtra(EXTRA_ALERT_FINGERPRINT)?.takeIf { it.isNotBlank() }
         val name = intent?.getStringExtra(EXTRA_ALERT_NAME)?.takeIf { it.isNotBlank() }
         if (fingerprint == null && name == null) return
@@ -48,5 +51,6 @@ class MainActivity : FragmentActivity() {
     companion object {
         const val EXTRA_ALERT_FINGERPRINT = "grafusion.alert.fingerprint"
         const val EXTRA_ALERT_NAME = "grafusion.alert.name"
+        const val EXTRA_OPEN_ROUTE = "grafusion.open.route"
     }
 }
