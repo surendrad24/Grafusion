@@ -1373,7 +1373,7 @@ private fun PanelCard(
                     onOpenBrowser = onOpenBrowser,
                 )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
-                val selfLoads = panel.type == "alertlist" || panel.type == "dashlist" || panel.type == "annolist"
+                val selfLoads = panel.type in setOf("alertlist", "dashlist", "annolist", "news", "text", "canvas")
                 when {
                     selfLoads -> PanelBody(panel = panel, data = data ?: PanelData(emptyList()), cardWidth = cardW)
                     data == null -> PanelLoading()
@@ -1478,18 +1478,18 @@ private fun PanelHeader(
 @Composable
 private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
     when (panel.type) {
-        "timeseries", "graph" -> TimeseriesPanel(data)
-        "stat" -> StatOrGaugePanel(panel, data, cardWidth)
+        "timeseries", "graph", "graph-old" -> TimeseriesPanel(data)
+        "stat", "singlestat" -> StatOrGaugePanel(panel, data, cardWidth)
         "gauge" -> GaugePanel(panel, data, cardWidth)
         "bargauge" -> BarGaugePanel(panel, data)
-        "table" -> TablePanel(data)
+        "table", "table-old" -> TablePanel(data)
         "barchart" -> BarChartPanel(panel, data)
-        "piechart" -> PieChartPanel(panel, data)
-        "heatmap" -> HeatmapPanel(data)
+        "piechart", "grafana-piechart-panel" -> PieChartPanel(panel, data)
+        "heatmap", "heatmap-old" -> HeatmapPanel(data)
         "state-timeline", "status-history" -> StateTimelinePanel(data)
         "logs" -> LogsPanel(data)
         "text" -> TextPanel(panel)
-        "geomap", "worldmap-panel" -> GeomapPanel(data)
+        "geomap", "worldmap-panel", "grafana-worldmap-panel" -> GeomapPanel(data)
         "alertlist" -> AlertListPanel(panel)
         "dashlist" -> DashListPanel(panel)
         "histogram" -> HistogramPanel(panel, data)
@@ -1497,6 +1497,11 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "trend" -> TrendPanel(data)
         "xychart", "xy-chart" -> XyChartPanel(data)
         "annolist" -> AnnotationsListPanel(panel)
+        "news" -> NewsPanel(panel)
+        "nodeGraph", "node-graph" -> NodeGraphPanel(data)
+        "flamegraph", "grafana-pyroscope-app-flamegraph" -> FlamegraphPanel(data)
+        "traces" -> TracesPanel(data)
+        "canvas" -> CanvasPanel(panel)
         else -> UnsupportedPanel(panel.type, null)
     }
 }
