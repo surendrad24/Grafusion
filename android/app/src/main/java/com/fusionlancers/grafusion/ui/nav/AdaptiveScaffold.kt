@@ -12,6 +12,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -39,6 +41,15 @@ fun AdaptiveScaffold(
 ) {
     val current by navController.currentBackStackEntryAsState()
     val currentRoute = current?.destination?.route
+
+    // When a notification tap sets a pending alert deep-link, jump to the Alerts tab.
+    // AlertsScreen itself consumes the flow to open the matching alert sheet.
+    val pendingAlert by container.pendingAlertDeepLink.collectAsState()
+    LaunchedEffect(pendingAlert) {
+        if (pendingAlert != null && currentRoute != TopDest.Alerts.route) {
+            navController.navigateSingleTop(TopDest.Alerts.route)
+        }
+    }
 
     if (useNavRail) {
         Row(Modifier.fillMaxSize()) {

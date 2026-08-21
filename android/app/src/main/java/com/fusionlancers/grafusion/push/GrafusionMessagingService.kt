@@ -53,7 +53,9 @@ class GrafusionMessagingService : FirebaseMessagingService() {
             ?: message.notification?.body
             ?: message.data["summary"]
             ?: "Alert received"
-        showAlertNotification(this, title, body)
+        val fingerprint = message.data["fingerprint"] ?: message.data["alert_fingerprint"]
+        val alertName = message.data["alertname"] ?: message.data["alert_name"] ?: title
+        showAlertNotification(this, title, body, fingerprint, alertName)
     }
 }
 
@@ -74,7 +76,13 @@ object NotificationChannels {
     }
 }
 
-internal fun showAlertNotification(context: Context, title: String, body: String) {
+internal fun showAlertNotification(
+    context: Context,
+    title: String,
+    body: String,
+    fingerprint: String? = null,
+    alertName: String? = null,
+) {
     NotificationChannels.ensureCreated(context)
     // POST_NOTIFICATIONS is runtime-required on Android 13+; the PermissionsScreen prompts for it.
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -82,10 +90,18 @@ internal fun showAlertNotification(context: Context, title: String, body: String
             PackageManager.PERMISSION_GRANTED
         if (!granted) return
     }
+    val openIntent = Intent(context, MainActivity::class.java)
+        .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        .apply {
+            if (!fingerprint.isNullOrBlank()) putExtra(MainActivity.EXTRA_ALERT_FINGERPRINT, fingerprint)
+            if (!alertName.isNullOrBlank()) putExtra(MainActivity.EXTRA_ALERT_NAME, alertName)
+        }
+    // Use a per-alert request code so successive notifications don't overwrite each other's extras.
+    val requestCode = (fingerprint ?: alertName ?: title).hashCode()
     val openApp = PendingIntent.getActivity(
         context,
-        0,
-        Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+        requestCode,
+        openIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
     val notification = NotificationCompat.Builder(context, NotificationChannels.ALERTS_ID)

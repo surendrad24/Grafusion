@@ -50,6 +50,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -101,6 +102,23 @@ fun AlertsScreen(container: AppContainer) {
     }
 
     LaunchedEffect(Unit) { reload() }
+
+    // Notification tap deep-link: open the sheet for the matching alert once alerts have loaded.
+    // We match on fingerprint first (exact), then fall back to alert name (relay may omit the fp).
+    val pendingDeepLink by container.pendingAlertDeepLink.collectAsState()
+    LaunchedEffect(pendingDeepLink, alerts) {
+        val dl = pendingDeepLink ?: return@LaunchedEffect
+        if (alerts.isEmpty()) return@LaunchedEffect
+        val match = alerts.firstOrNull { dl.fingerprint != null && it.fingerprint == dl.fingerprint }
+            ?: alerts.firstOrNull { dl.name != null && it.name.equals(dl.name, ignoreCase = true) }
+        if (match != null) {
+            selected = match
+            container.pendingAlertDeepLink.value = null
+        } else if (!refreshing) {
+            // Alerts loaded but no match - drop the link so we don't keep re-opening the tab.
+            container.pendingAlertDeepLink.value = null
+        }
+    }
 
     val firingCount = alerts.count { it.state == AlertState.FIRING }
     val pendingCount = alerts.count { it.state == AlertState.PENDING }

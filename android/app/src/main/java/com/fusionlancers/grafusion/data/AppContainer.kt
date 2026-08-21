@@ -14,6 +14,7 @@ import com.fusionlancers.grafusion.data.repo.ExploreRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
+import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
  * Manual DI container. Constructed once from Application.onCreate.
@@ -66,4 +67,10 @@ class AppContainer(context: Context) {
         accountRepository = accountRepository,
         apiFactory = apiFactory,
     )
+
+    /** Set by MainActivity when opened via a notification tap; consumed by AlertsScreen. */
+    val pendingAlertDeepLink = MutableStateFlow<AlertDeepLink?>(null)
 }
+
+/** [fingerprint] is preferred; [name] is a fallback when the relay omitted the fingerprint. */
+data class AlertDeepLink(val fingerprint: String?, val name: String?)
