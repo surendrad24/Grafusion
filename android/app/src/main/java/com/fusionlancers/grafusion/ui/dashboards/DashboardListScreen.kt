@@ -87,6 +87,16 @@ fun DashboardListScreen(
         refreshing = false
     }
 
+    // Auto-jump to the Grafana-configured home dashboard once per process launch, but only
+    // after the list has loaded so we can confirm the UID still resolves and grab its title.
+    LaunchedEffect(dashboards) {
+        if (container.homeAutoOpenConsumed.value) return@LaunchedEffect
+        val homeUid = container.themePreferences.homeDashboardUid() ?: return@LaunchedEffect
+        val target = dashboards.firstOrNull { it.uid == homeUid } ?: return@LaunchedEffect
+        container.homeAutoOpenConsumed.value = true
+        onOpenDashboard(target.uid, target.title)
+    }
+
     val folders = remember(dashboards) {
         dashboards.mapNotNull { it.folderTitle?.takeIf { s -> s.isNotBlank() } }.distinct().sorted()
     }

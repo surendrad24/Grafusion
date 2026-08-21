@@ -21,6 +21,14 @@ class ThemePreferences(context: Context) {
         prefs.edit().putString(KEY, mode.name).apply()
     }
 
+    /** UID of the home dashboard synced from Grafana user preferences (nullable when unset). */
+    fun homeDashboardUid(): String? = prefs.getString(KEY_HOME, null)?.takeIf { it.isNotBlank() }
+    fun setHomeDashboardUid(uid: String?) {
+        prefs.edit().apply {
+            if (uid.isNullOrBlank()) remove(KEY_HOME) else putString(KEY_HOME, uid)
+        }.apply()
+    }
+
     val flow: Flow<ThemeMode> = callbackFlow {
         trySend(current())
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changed ->
@@ -32,5 +40,6 @@ class ThemePreferences(context: Context) {
 
     companion object {
         private const val KEY = "theme_mode"
+        private const val KEY_HOME = "home_dashboard_uid"
     }
 }

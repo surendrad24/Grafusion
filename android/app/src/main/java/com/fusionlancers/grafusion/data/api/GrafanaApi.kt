@@ -18,6 +18,9 @@ interface GrafanaApi {
     @GET("api/user")
     suspend fun currentUser(@Header("Authorization") auth: String): GrafanaUser
 
+    @GET("api/user/preferences")
+    suspend fun userPreferences(@Header("Authorization") auth: String): UserPreferences
+
     @POST("api/auth/keys")
     suspend fun createLegacyApiKey(
         @Header("Authorization") auth: String,
@@ -278,6 +281,15 @@ data class DashboardSummary(
     @SerialName("folderUid") val folderUid: String? = null,
     val tags: List<String> = emptyList(),
     val isStarred: Boolean = false,
+)
+
+@Serializable
+data class UserPreferences(
+    val theme: String? = null,
+    val homeDashboardUID: String? = null,
+    val timezone: String? = null,
+    val weekStart: String? = null,
+    val language: String? = null,
 )
 
 @Serializable

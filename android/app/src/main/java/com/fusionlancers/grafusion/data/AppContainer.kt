@@ -15,6 +15,7 @@ import com.fusionlancers.grafusion.data.repo.LokiTailClient
 import com.fusionlancers.grafusion.data.repo.NotificationHistoryRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
+import com.fusionlancers.grafusion.data.repo.UserPreferencesRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -79,8 +80,20 @@ class AppContainer(context: Context) {
         dao = db.notificationHistoryDao(),
     )
 
+    val userPreferencesRepository = UserPreferencesRepository(
+        accountRepository = accountRepository,
+        themePreferences = themePreferences,
+        apiFactory = apiFactory,
+    )
+
     /** Set by MainActivity when opened via a notification tap; consumed by AlertsScreen. */
     val pendingAlertDeepLink = MutableStateFlow<AlertDeepLink?>(null)
+
+    /**
+     * Session-scoped guard so we auto-open the home dashboard at most once per process launch.
+     * Flipped by DashboardListScreen after it fires the first navigation.
+     */
+    val homeAutoOpenConsumed = MutableStateFlow(false)
 }
 
 /** [fingerprint] is preferred; [name] is a fallback when the relay omitted the fingerprint. */

@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brightness6
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.LightMode
@@ -172,6 +173,31 @@ fun AccountsScreen(
                                 },
                             )
                         }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    val homeUid = container.themePreferences.homeDashboardUid()
+                    Text(
+                        homeUid?.let { "Home dashboard: $it" } ?: "No home dashboard synced",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                val r = container.userPreferencesRepository.sync()
+                                snackbar.showSnackbar(
+                                    if (r.isSuccess) "Synced theme + home dashboard from Grafana"
+                                    else "Sync failed: ${r.exceptionOrNull()?.message}"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Sync from Grafana")
                     }
                 }
             }
