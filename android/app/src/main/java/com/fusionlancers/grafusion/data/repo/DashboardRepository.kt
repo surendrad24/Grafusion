@@ -7,6 +7,7 @@ import com.fusionlancers.grafusion.data.model.Dashboard
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.PanelGroup
+import com.fusionlancers.grafusion.data.model.Variable
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
@@ -88,14 +89,15 @@ class DashboardRepository(
      * it offline; on network failure, tries to hydrate from the cache before rethrowing.
      */
     suspend fun panelsFor(uid: String): PanelsResult {
-        val entity = accountRepository.activeEntity() ?: return PanelsResult(emptyList(), emptyList(), false)
-        val auth = accountRepository.authHeaderFor(entity) ?: return PanelsResult(emptyList(), emptyList(), false)
+        val entity = accountRepository.activeEntity() ?: return PanelsResult(emptyList(), emptyList(), emptyList(), false)
+        val auth = accountRepository.authHeaderFor(entity) ?: return PanelsResult(emptyList(), emptyList(), emptyList(), false)
         val api = apiFactory.forBaseUrl(entity.grafanaUrl)
 
         return try {
             val detail = api.dashboardByUid(auth, uid)
             val parsed = PanelParser.parsePanels(detail.dashboard)
             val groups = PanelParser.parseGroups(detail.dashboard)
+            val variables = VariableParser.parse(detail.dashboard)
             // Persist the raw dashboard JSON so we can render offline next time.
             runCatching {
                 val json = kotlinx.serialization.json.Json.encodeToString(
@@ -104,33 +106,49 @@ class DashboardRepository(
                 )
                 dashboardDao.updateDetail(entity.id, uid, json)
             }
-            PanelsResult(parsed, groups, fromCache = false)
+            PanelsResult(parsed, groups, variables, fromCache = false)
         } catch (t: Throwable) {
             val cached = dashboardDao.detailJsonFor(entity.id, uid)
                 ?: throw t
             val obj = kotlinx.serialization.json.Json.parseToJsonElement(cached).jsonObject
-            PanelsResult(PanelParser.parsePanels(obj), PanelParser.parseGroups(obj), fromCache = true)
+            PanelsResult(PanelParser.parsePanels(obj), PanelParser.parseGroups(obj), VariableParser.parse(obj), fromCache = true)
         }
     }
 
-    data class PanelsResult(val panels: List<Panel>, val groups: List<PanelGroup>, val fromCache: Boolean)
+    data class PanelsResult(
+        val panels: List<Panel>,
+        val groups: List<PanelGroup>,
+        val variables: List<Variable> = emptyList(),
+        val fromCache: Boolean,
+    )
 
     /**
      * Run a single panel's first target through /api/ds/query.
      * from/to are Grafana time expressions (e.g. "now-6h" / "now") or millis-since-epoch strings.
      */
-    suspend fun queryPanel(panel: Panel, from: String = "now-6h", to: String = "now"): Result<PanelData> = runCatching {
+    suspend fun queryPanel(
+        panel: Panel,
+        from: String = "now-6h",
+        to: String = "now",
+        variables: List<Variable> = emptyList(),
+    ): Result<PanelData> = runCatching {
         val entity = accountRepository.activeEntity() ?: error("No active account")
         val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
         val api = apiFactory.forBaseUrl(entity.grafanaUrl)
 
+        val pinnedVars = if (panel.repeat != null && panel.repeatValue != null) {
+            variables.map { v -> if (v.name == panel.repeat) v.copy(current = listOf(panel.repeatValue)) else v }
+        } else variables
+        val varMap = pinnedVars.associateBy { it.name }
+        val (effectiveFrom, effectiveTo) = applyPanelTimeOverrides(from, to, panel.timeFrom, panel.timeShift)
         val body = buildJsonObject {
-            put("from", from)
-            put("to", to)
+            put("from", effectiveFrom)
+            put("to", effectiveTo)
             put("queries", buildJsonArray {
                 panel.targets.forEachIndexed { idx, target ->
                     val existingRef = (target["refId"] as? JsonPrimitive)?.content ?: refIdFor(idx)
-                    add(mergeTarget(target, panel, existingRef))
+                    val interpolated = VariableInterpolator.interpolateElement(target, varMap) as JsonObject
+                    add(mergeTarget(interpolated, panel, existingRef))
                 }
             })
         }
@@ -331,6 +349,34 @@ class DashboardRepository(
         }
         val resp = api.saveDashboard(auth, body)
         if (resp.status != null && resp.status != "success") error(resp.status)
+    }
+
+    /**
+     * Apply per-panel time overrides. Grafana rules:
+     *  - timeFrom "1h" -> from = now-1h, to unchanged.
+     *  - timeShift "1d" -> both from and to get "-1d" arithmetically inserted after "now".
+     * Both fields accept Grafana duration expressions ("1h", "30m", "1d", "1M", "1y").
+     */
+    private fun applyPanelTimeOverrides(
+        from: String,
+        to: String,
+        timeFrom: String?,
+        timeShift: String?,
+    ): Pair<String, String> {
+        var f = from
+        var t = to
+        if (!timeFrom.isNullOrBlank()) f = "now-$timeFrom"
+        if (!timeShift.isNullOrBlank()) {
+            f = shiftExpr(f, timeShift)
+            t = shiftExpr(t, timeShift)
+        }
+        return f to t
+    }
+
+    private fun shiftExpr(expr: String, shift: String): String = when {
+        expr == "now" -> "now-$shift"
+        expr.startsWith("now") -> "now-$shift" + expr.removePrefix("now")
+        else -> expr // numeric timestamps or non-`now` expressions: leave alone
     }
 
     private fun refIdFor(idx: Int): String = ('A' + idx).toString()

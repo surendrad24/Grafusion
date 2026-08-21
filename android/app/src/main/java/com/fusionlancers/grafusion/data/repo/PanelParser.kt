@@ -6,6 +6,7 @@ import com.fusionlancers.grafusion.data.model.PanelGroup
 import com.fusionlancers.grafusion.data.model.RawFrame
 import com.fusionlancers.grafusion.data.model.Series
 import com.fusionlancers.grafusion.data.model.Threshold
+import com.fusionlancers.grafusion.data.model.ValueMapping
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -80,7 +81,12 @@ internal object PanelParser {
         val min = fieldConfig?.get("min")?.jsonPrimitive?.doubleOrNullSafe()
         val max = fieldConfig?.get("max")?.jsonPrimitive?.doubleOrNullSafe()
         val thresholds = parseThresholds(fieldConfig)
+        val mappings = parseMappings(fieldConfig)
         val description = obj["description"]?.jsonPrimitive?.contentOrNullSafe()
+        val timeFrom = obj["timeFrom"]?.jsonPrimitive?.contentOrNullSafe()
+        val timeShift = obj["timeShift"]?.jsonPrimitive?.contentOrNullSafe()
+        val repeat = obj["repeat"]?.jsonPrimitive?.contentOrNullSafe()
+        val repeatDirection = obj["repeatDirection"]?.jsonPrimitive?.contentOrNullSafe()
         return Panel(
             id = id,
             title = title,
@@ -99,7 +105,62 @@ internal object PanelParser {
             max = max,
             thresholds = thresholds,
             description = description?.takeIf { it.isNotBlank() },
+            mappings = mappings,
+            timeFrom = timeFrom?.takeIf { it.isNotBlank() },
+            timeShift = timeShift?.takeIf { it.isNotBlank() },
+            repeat = repeat?.takeIf { it.isNotBlank() },
+            repeatDirection = repeatDirection?.takeIf { it.isNotBlank() },
         )
+    }
+
+    private fun parseMappings(fieldConfig: JsonObject?): List<ValueMapping> {
+        val arr = fieldConfig?.get("mappings")?.jsonArray ?: return emptyList()
+        val out = mutableListOf<ValueMapping>()
+        for (el in arr) {
+            val obj = el as? JsonObject ?: continue
+            val type = obj["type"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+            val options = obj["options"] as? JsonObject ?: continue
+            when (type) {
+                "value" -> {
+                    for ((k, v) in options) {
+                        val vObj = v as? JsonObject ?: continue
+                        out += ValueMapping.Value(
+                            value = k,
+                            text = vObj["text"]?.jsonPrimitive?.contentOrNullSafe(),
+                            color = vObj["color"]?.jsonPrimitive?.contentOrNullSafe(),
+                        )
+                    }
+                }
+                "range" -> {
+                    val result = options["result"] as? JsonObject
+                    out += ValueMapping.Range(
+                        from = options["from"]?.jsonPrimitive?.doubleOrNullSafe(),
+                        to = options["to"]?.jsonPrimitive?.doubleOrNullSafe(),
+                        text = result?.get("text")?.jsonPrimitive?.contentOrNullSafe(),
+                        color = result?.get("color")?.jsonPrimitive?.contentOrNullSafe(),
+                    )
+                }
+                "regex" -> {
+                    val result = options["result"] as? JsonObject
+                    val pattern = options["pattern"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+                    out += ValueMapping.Regex(
+                        pattern = pattern,
+                        text = result?.get("text")?.jsonPrimitive?.contentOrNullSafe(),
+                        color = result?.get("color")?.jsonPrimitive?.contentOrNullSafe(),
+                    )
+                }
+                "special" -> {
+                    val result = options["result"] as? JsonObject
+                    val match = options["match"]?.jsonPrimitive?.contentOrNullSafe() ?: continue
+                    out += ValueMapping.Special(
+                        match = match,
+                        text = result?.get("text")?.jsonPrimitive?.contentOrNullSafe(),
+                        color = result?.get("color")?.jsonPrimitive?.contentOrNullSafe(),
+                    )
+                }
+            }
+        }
+        return out
     }
 
     private fun parseThresholds(fieldConfig: JsonObject?): List<Threshold> {

@@ -28,7 +28,29 @@ data class Panel(
     val max: Double? = null,
     val thresholds: List<Threshold> = emptyList(),
     val description: String? = null,
+    val mappings: List<ValueMapping> = emptyList(),
+    val timeFrom: String? = null,
+    val timeShift: String? = null,
+    val repeat: String? = null,
+    val repeatDirection: String? = null,
+    /** Set on cloned panels produced by expandRepeats() - single-value override for [repeat]. */
+    val repeatValue: String? = null,
 )
+
+/** fieldConfig.defaults.mappings entry. Grafana v9+ shape: { type, options }.
+ *  We flatten to a list of (matcher, text, color) tuples that stat/gauge/table can consult. */
+sealed class ValueMapping {
+    abstract val text: String?
+    abstract val color: String?
+    /** Exact value match: "1" -> "OK". */
+    data class Value(val value: String, override val text: String?, override val color: String?) : ValueMapping()
+    /** Numeric range: from..to -> text. Either bound may be null for open-ended. */
+    data class Range(val from: Double?, val to: Double?, override val text: String?, override val color: String?) : ValueMapping()
+    /** Regex on string values. */
+    data class Regex(val pattern: String, override val text: String?, override val color: String?) : ValueMapping()
+    /** Special mapping for NaN, null, empty. */
+    data class Special(val match: String, override val text: String?, override val color: String?) : ValueMapping()
+}
 
 /** One step from Grafana fieldConfig.defaults.thresholds.steps. */
 data class Threshold(

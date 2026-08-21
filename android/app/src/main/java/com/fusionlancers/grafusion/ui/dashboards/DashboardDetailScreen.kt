@@ -8,6 +8,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -131,6 +132,8 @@ import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.PanelGroup
 import com.fusionlancers.grafusion.data.model.RawFrame
+import com.fusionlancers.grafusion.data.model.ValueMapping
+import com.fusionlancers.grafusion.data.model.Variable
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.ui.theme.DataPurple
 import com.fusionlancers.grafusion.ui.theme.EnergyOrange
@@ -200,6 +203,23 @@ fun DashboardDetailScreen(
     var dashboardId by remember { mutableStateOf<Long?>(null) }
     var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
     var offline by remember { mutableStateOf(false) }
+    var variables by remember { mutableStateOf<List<Variable>>(emptyList()) }
+    // Per-variable current-value overrides. Empty until user picks.
+    val varOverrides = remember { mutableStateMapOf<String, List<String>>() }
+    val effectiveVars = remember(variables, varOverrides.toMap()) {
+        variables.map { v ->
+            val override = varOverrides[v.name]
+            if (override != null) v.copy(current = override) else v
+        }
+    }
+    // Expand panels with `repeat=varname` into one clone per selected value. Only in view mode -
+    // edit mode operates on the original template list so users don't accidentally save clones.
+    val expandedGroups = remember(groups, effectiveVars, editMode) {
+        if (editMode) groups else com.fusionlancers.grafusion.data.repo.RepeatExpander.expand(groups, effectiveVars)
+    }
+    val expandedPanels = remember(expandedGroups, editMode, panels) {
+        if (editMode) panels else expandedGroups.flatMap { it.panels }
+    }
     // Collapsed row-group keys in view mode (title-based; ungrouped runs never collapse).
     val collapsedRows = remember { mutableStateListOf<String>() }
 
@@ -210,6 +230,7 @@ fun DashboardDetailScreen(
             .onSuccess { result ->
                 panels = result.panels
                 groups = result.groups
+                variables = result.variables
                 offline = result.fromCache
                 loading = false
             }
@@ -234,9 +255,9 @@ fun DashboardDetailScreen(
         }
     }
 
-    // Fetch panel data whenever panel list or range changes.
-    LaunchedEffect(panels, range) {
-        panels.forEach { panel ->
+    // Fetch panel data whenever panel list, range, or variable values change.
+    LaunchedEffect(expandedPanels, range, effectiveVars) {
+        expandedPanels.forEach { panel ->
             if (panel.targets.isEmpty()) {
                 panelData[panel.id] = PanelData(series = emptyList())
                 return@forEach
@@ -244,7 +265,7 @@ fun DashboardDetailScreen(
             panelData[panel.id] = null
             scope.launch {
                 container.dashboardRepository
-                    .queryPanel(panel, from = fromExpr, to = toExpr)
+                    .queryPanel(panel, from = fromExpr, to = toExpr, variables = effectiveVars)
                     .onSuccess { panelData[panel.id] = it }
                     .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
             }
@@ -252,15 +273,15 @@ fun DashboardDetailScreen(
     }
 
     // Auto-refresh loop.
-    LaunchedEffect(refresh, panels, range) {
+    LaunchedEffect(refresh, expandedPanels, range, effectiveVars) {
         val ms = refresh.millis ?: return@LaunchedEffect
         while (true) {
             delay(ms)
-            panels.forEach { panel ->
+            expandedPanels.forEach { panel ->
                 if (panel.targets.isEmpty()) return@forEach
                 scope.launch {
                     container.dashboardRepository
-                        .queryPanel(panel, from = fromExpr, to = toExpr)
+                        .queryPanel(panel, from = fromExpr, to = toExpr, variables = effectiveVars)
                         .onSuccess { panelData[panel.id] = it }
                         .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
                 }
@@ -337,7 +358,7 @@ fun DashboardDetailScreen(
                                                 originalIds.clear()
                                                 panelData.clear()
                                                 runCatching { container.dashboardRepository.panelsFor(uid) }
-                                                    .onSuccess { panels = it.panels; groups = it.groups; offline = it.fromCache }
+                                                    .onSuccess { panels = it.panels; groups = it.groups; variables = it.variables; offline = it.fromCache }
                                             }
                                             .onFailure { saveMessage = "Save failed: ${it.message ?: "unknown"}" }
                                         saving = false
@@ -370,10 +391,10 @@ fun DashboardDetailScreen(
                         RefreshMenu(refresh, onSelect = { refresh = it })
                         IconButton(onClick = {
                             scope.launch {
-                                panels.forEach { panel ->
+                                expandedPanels.forEach { panel ->
                                     panelData[panel.id] = null
                                     container.dashboardRepository
-                                        .queryPanel(panel, from = fromExpr, to = toExpr)
+                                        .queryPanel(panel, from = fromExpr, to = toExpr, variables = effectiveVars)
                                         .onSuccess { panelData[panel.id] = it }
                                         .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
                                 }
@@ -416,7 +437,7 @@ fun DashboardDetailScreen(
                 else -> BoxWithConstraints(Modifier.fillMaxSize()) {
                     // Use side-by-side grid layout on wider screens; single column on narrow.
                     val useGrid = maxWidth > 600.dp
-                    val bands = remember(panels, useGrid) { groupIntoRows(panels, useGrid) }
+                    val bands = remember(expandedPanels, useGrid) { groupIntoRows(expandedPanels, useGrid) }
                     LazyColumn(
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -490,8 +511,16 @@ fun DashboardDetailScreen(
                                     onOpenCustom = { customDialogOpen = true },
                                 )
                             }
+                            if (effectiveVars.any { it.hide != 2 }) {
+                                item {
+                                    VariablesBar(
+                                        variables = effectiveVars,
+                                        onPick = { name, values -> varOverrides[name] = values },
+                                    )
+                                }
+                            }
                             renderGroupedPanels(
-                                groups = groups,
+                                groups = expandedGroups,
                                 fallbackBands = bands,
                                 useGrid = useGrid,
                                 panelData = panelData,
@@ -753,6 +782,131 @@ private fun TimeRangeBar(
                     labelColor = if (customLabel != null) EnergyOrange else MaterialTheme.colorScheme.onSurface,
                 ),
             )
+        }
+    }
+}
+
+/** Row of chips showing each visible template variable + its current value. Tap opens a picker. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun VariablesBar(
+    variables: List<Variable>,
+    onPick: (name: String, values: List<String>) -> Unit,
+) {
+    var picking by remember { mutableStateOf<Variable?>(null) }
+    androidx.compose.foundation.layout.FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        variables.filter { it.hide != 2 }.forEach { v ->
+            val label = v.label?.takeIf { it.isNotBlank() } ?: v.name
+            val valueSummary = when {
+                v.current.isEmpty() -> "-"
+                v.current.size == 1 -> v.current.first()
+                else -> "${v.current.first()} +${v.current.size - 1}"
+            }
+            AssistChip(
+                onClick = { if (v.type != "constant") picking = v },
+                label = {
+                    Text("$label: $valueSummary", maxLines = 1, style = MaterialTheme.typography.labelMedium)
+                },
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = EnergyOrange.copy(alpha = 0.14f),
+                    labelColor = EnergyOrange,
+                ),
+            )
+        }
+    }
+    picking?.let { v ->
+        VariablePickerDialog(
+            variable = v,
+            onDismiss = { picking = null },
+            onConfirm = { picked -> onPick(v.name, picked); picking = null },
+        )
+    }
+}
+
+@Composable
+private fun VariablePickerDialog(
+    variable: Variable,
+    onDismiss: () -> Unit,
+    onConfirm: (List<String>) -> Unit,
+) {
+    val selected = remember { mutableStateListOf<String>().apply { addAll(variable.current) } }
+    var textValue by remember { mutableStateOf(variable.current.firstOrNull().orEmpty()) }
+    val title = variable.label?.takeIf { it.isNotBlank() } ?: variable.name
+    Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(20.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(10.dp))
+                when {
+                    variable.type == "textbox" -> {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = textValue,
+                            onValueChange = { textValue = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    variable.options.isEmpty() -> {
+                        Text(
+                            "No options were bundled with this dashboard. Type a value:",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        androidx.compose.material3.OutlinedTextField(
+                            value = textValue,
+                            onValueChange = { textValue = it },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                    else -> {
+                        androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 320.dp)) {
+                            items(variable.options) { opt ->
+                                val checked = selected.contains(opt.value)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            if (variable.multi) {
+                                                if (checked) selected.remove(opt.value) else selected.add(opt.value)
+                                            } else {
+                                                selected.clear(); selected.add(opt.value)
+                                            }
+                                        }
+                                        .padding(vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    if (variable.multi) {
+                                        androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = null)
+                                        Spacer(Modifier.width(8.dp))
+                                    } else {
+                                        androidx.compose.material3.RadioButton(selected = checked, onClick = null)
+                                        Spacer(Modifier.width(8.dp))
+                                    }
+                                    Text(opt.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.width(6.dp))
+                    androidx.compose.material3.Button(onClick = {
+                        val out = when {
+                            variable.type == "textbox" || variable.options.isEmpty() -> listOf(textValue)
+                            else -> selected.toList().ifEmpty { variable.current }
+                        }
+                        onConfirm(out)
+                    }) { Text("Apply") }
+                }
+            }
         }
     }
 }
@@ -1907,7 +2061,9 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
     }.orEmpty()
     val values = if (seriesValues.isNotEmpty()) seriesValues else frameValues
     val latest = reduceStat(values, calc)
+    val mapped = mapValue(latest, panel.mappings)
     val display = when {
+        mapped?.first != null -> mapped.first!!
         latest == null -> "-"
         else -> formatValue(latest, panel.unit, panel.decimals)
     }
@@ -1927,7 +2083,7 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
     val colorMode = remember(panel.options) {
         (panel.options?.get("colorMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "value"
     }
-    val valueColor = if (colorMode == "none" || latest == null) EnergyOrange
+    val thresholdColor = if (colorMode == "none" || latest == null) EnergyOrange
     else thresholdColorFor(
         value = latest,
         thresholds = thresholds,
@@ -1935,6 +2091,7 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
         isPercent = panel.unit?.startsWith("percent") == true,
         absolute = panel.thresholds.isNotEmpty(),
     )
+    val valueColor = mapped?.second?.let { grafanaColor(it) } ?: thresholdColor
 
     Box(Modifier.fillMaxWidth().heightIn(min = 72.dp), contentAlignment = Alignment.Center) {
         if (sparklinePoints.isNotEmpty()) {
@@ -1986,14 +2143,15 @@ private fun StatGrid(
         data.series.forEach { s ->
             val values = s.values.filterNotNull()
             val reduced = reduceStat(values, calc)
-            val display = reduced?.let { formatValue(it, panel.unit, panel.decimals) } ?: "-"
+            val mapped = mapValue(reduced, panel.mappings)
+            val display = mapped?.first ?: reduced?.let { formatValue(it, panel.unit, panel.decimals) } ?: "-"
             val approxCharDp = (cellWidth.value - 12f) / display.length.coerceAtLeast(1)
             val fontSize = (approxCharDp * 1.9f).coerceIn(14f, 22f)
             val sparklinePairs = if (graphMode == "area" || graphMode == "line") {
                 s.timestamps.zip(s.values).mapNotNull { (t, v) -> v?.let { t to it } }
                     .takeIf { it.size >= 2 } ?: emptyList()
             } else emptyList()
-            val cellColor = if (colorMode == "none" || reduced == null) EnergyOrange
+            val thresholdCellColor = if (colorMode == "none" || reduced == null) EnergyOrange
             else thresholdColorFor(
                 value = reduced,
                 thresholds = thresholds,
@@ -2001,6 +2159,7 @@ private fun StatGrid(
                 isPercent = isPercent,
                 absolute = panel.thresholds.isNotEmpty(),
             )
+            val cellColor = mapped?.second?.let { grafanaColor(it) } ?: thresholdCellColor
             Column(
                 modifier = Modifier
                     .width(cellWidth)
@@ -2465,6 +2624,40 @@ private fun parseThresholds(panel: Panel): List<UiThreshold> {
         UiThreshold(0.6, Color(0xFFF1C40F)),
         UiThreshold(0.85, Color(0xFFE74C3C)),
     )
+}
+
+/**
+ * Resolve a value against Grafana fieldConfig.defaults.mappings. Returns (text, colorToken) with
+ * either component possibly null. Grafana precedence: value -> range -> regex -> special.
+ * Special "match" values: "null", "nan", "empty", "true", "false", "null+nan".
+ */
+private fun mapValue(v: Double?, mappings: List<ValueMapping>): Pair<String?, String?>? {
+    if (mappings.isEmpty()) return null
+    val asString = v?.let {
+        if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString()
+    }
+    for (m in mappings) when (m) {
+        is ValueMapping.Value -> if (asString != null && m.value == asString) return m.text to m.color
+        is ValueMapping.Range -> if (v != null) {
+            val lo = m.from ?: Double.NEGATIVE_INFINITY
+            val hi = m.to ?: Double.POSITIVE_INFINITY
+            if (v in lo..hi) return m.text to m.color
+        }
+        is ValueMapping.Regex -> if (asString != null && runCatching { Regex(m.pattern).containsMatchIn(asString) }.getOrDefault(false)) return m.text to m.color
+        is ValueMapping.Special -> {
+            val matches = when (m.match) {
+                "null" -> v == null
+                "nan" -> v != null && v.isNaN()
+                "null+nan" -> v == null || v.isNaN()
+                "empty" -> asString.isNullOrEmpty()
+                "true" -> v == 1.0
+                "false" -> v == 0.0
+                else -> false
+            }
+            if (matches) return m.text to m.color
+        }
+    }
+    return null
 }
 
 /**

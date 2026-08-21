@@ -66,6 +66,7 @@ private sealed class DashFilter {
     object All : DashFilter()
     object Starred : DashFilter()
     data class Folder(val name: String) : DashFilter()
+    data class Tag(val name: String) : DashFilter()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,6 +90,9 @@ fun DashboardListScreen(
     val folders = remember(dashboards) {
         dashboards.mapNotNull { it.folderTitle?.takeIf { s -> s.isNotBlank() } }.distinct().sorted()
     }
+    val tags = remember(dashboards) {
+        dashboards.flatMap { it.tags }.filter { it.isNotBlank() }.distinct().sorted()
+    }
 
     val filtered = remember(dashboards, query, filter) {
         val q = query.trim().lowercase()
@@ -98,6 +102,7 @@ fun DashboardListScreen(
                     DashFilter.All -> true
                     DashFilter.Starred -> d.isStarred
                     is DashFilter.Folder -> d.folderTitle == f.name
+                    is DashFilter.Tag -> f.name in d.tags
                 }
             }
             .filter { d ->
@@ -177,6 +182,11 @@ fun DashboardListScreen(
             folders.forEach { name ->
                 FilterChipItem(name, (filter as? DashFilter.Folder)?.name == name) {
                     filter = DashFilter.Folder(name)
+                }
+            }
+            tags.forEach { name ->
+                FilterChipItem("#$name", (filter as? DashFilter.Tag)?.name == name) {
+                    filter = DashFilter.Tag(name)
                 }
             }
         }
