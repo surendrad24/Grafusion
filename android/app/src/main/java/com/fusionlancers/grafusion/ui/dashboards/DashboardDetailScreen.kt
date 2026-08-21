@@ -2247,29 +2247,72 @@ private fun LogsPanel(data: PanelData) {
     val lineIdx = frame.fieldNames.indexOfFirst { it.equals("Line", true) || it.equals("Body", true) || it.equals("Value", true) }
         .takeIf { it >= 0 } ?: frame.fieldTypes.indexOfFirst { it == "string" }
     if (lineIdx < 0) { PanelNoData(); return }
+    val levelIdx = frame.fieldNames.indexOfFirst {
+        it.equals("level", true) || it.equals("severity", true) || it.equals("SeverityText", true)
+    }
     val rowCount = frame.rowCount.coerceAtMost(50)
     Column(Modifier.fillMaxWidth()) {
         for (r in 0 until rowCount) {
             val ts = if (timeIdx >= 0) (frame.columns[timeIdx].getOrNull(r) as? Number)?.toLong() else null
             val line = frame.columns[lineIdx].getOrNull(r)?.toString().orEmpty()
-            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+            val level = when {
+                levelIdx >= 0 -> frame.columns[levelIdx].getOrNull(r)?.toString()
+                else -> detectLevel(line)
+            }
+            val (dot, tint) = logLevelStyle(level)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(tint.copy(alpha = 0.04f))
+                    .padding(vertical = 3.dp, horizontal = 4.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Box(
+                    Modifier
+                        .padding(top = 6.dp)
+                        .size(6.dp)
+                        .background(dot, RoundedCornerShape(50))
+                )
+                Spacer(Modifier.width(6.dp))
                 if (ts != null) {
                     Text(
                         SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(ts)),
-                        modifier = Modifier.width(72.dp),
+                        modifier = Modifier.width(64.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = EnergyOrange.copy(alpha = 0.9f),
+                        fontFamily = FontFamily.Monospace,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
                     )
                 }
                 Text(
                     line,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                    maxLines = 3,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
     }
+}
+
+private fun detectLevel(line: String): String? {
+    val head = line.take(120).lowercase()
+    return when {
+        "error" in head || "err " in head || "fatal" in head || "panic" in head -> "error"
+        "warn" in head -> "warn"
+        "debug" in head -> "debug"
+        "info" in head -> "info"
+        else -> null
+    }
+}
+
+private fun logLevelStyle(level: String?): Pair<Color, Color> = when (level?.lowercase()) {
+    "error", "err", "fatal", "critical" -> Color(0xFFEF4444) to Color(0xFFEF4444)
+    "warn", "warning" -> Color(0xFFF59E0B) to Color(0xFFF59E0B)
+    "info" -> Color(0xFF60A5FA) to Color(0xFF60A5FA)
+    "debug" -> Color(0xFF9CA3AF) to Color(0xFF9CA3AF)
+    else -> Color(0xFF6B7280) to Color.Transparent
 }
 
 @Composable
