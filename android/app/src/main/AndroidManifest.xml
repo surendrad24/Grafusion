@@ -31,10 +31,18 @@
 
         <activity
             android:name=".MainActivity"
-            android:exported="false"
+            android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
-            android:theme="@style/Theme.Grafusion" />
+            android:theme="@style/Theme.Grafusion">
+            <!-- grafana://d/<uid>  or  grafana://dashboard/<uid> -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="grafana" />
+            </intent-filter>
+        </activity>
 
         <!-- Firebase Cloud Messaging receiver. Only invoked when the FCM SDK is
              initialized (requires google-services.json to be present at build time). -->

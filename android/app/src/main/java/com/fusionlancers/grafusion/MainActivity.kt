@@ -42,6 +42,16 @@ class MainActivity : FragmentActivity() {
         intent?.getStringExtra(EXTRA_OPEN_ROUTE)?.takeIf { it.isNotBlank() }?.let {
             container.pendingStartRoute.value = it
         }
+        // grafana://d/<uid> or grafana://dashboard/<uid> -> jump straight to that dashboard.
+        val data = intent?.data
+        if (data != null && data.scheme.equals("grafana", ignoreCase = true)) {
+            val host = data.host?.lowercase()
+            val segments = data.pathSegments.orEmpty()
+            if ((host == "d" || host == "dashboard") && segments.isNotEmpty()) {
+                val uid = segments[0]
+                container.pendingStartRoute.value = "dashboard/$uid?title="
+            }
+        }
         val fingerprint = intent?.getStringExtra(EXTRA_ALERT_FINGERPRINT)?.takeIf { it.isNotBlank() }
         val name = intent?.getStringExtra(EXTRA_ALERT_NAME)?.takeIf { it.isNotBlank() }
         if (fingerprint == null && name == null) return

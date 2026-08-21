@@ -57,11 +57,16 @@ fun AdaptiveScaffold(
         }
     }
 
-    // Widget / external launcher hint: jump straight to the requested top-level tab.
+    // Widget / external launcher / grafana:// deep-link hint. Nested routes (e.g. dashboard/{uid})
+    // are pushed onto the back stack; top-level tabs use the single-top helper so they don't stack.
     val pendingRoute by container.pendingStartRoute.collectAsState()
     LaunchedEffect(pendingRoute) {
         val target = pendingRoute ?: return@LaunchedEffect
-        if (currentRoute != target) navController.navigateSingleTop(target)
+        if (target.startsWith("dashboard/")) {
+            navController.navigate(target)
+        } else if (currentRoute != target) {
+            navController.navigateSingleTop(target)
+        }
         container.pendingStartRoute.value = null
     }
 

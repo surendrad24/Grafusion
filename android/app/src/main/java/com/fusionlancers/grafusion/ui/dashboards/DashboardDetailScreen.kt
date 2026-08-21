@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Timer
@@ -71,6 +72,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SegmentedButton
@@ -210,6 +212,7 @@ fun DashboardDetailScreen(
     var annotationSheetOpen by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     var offline by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
     var variables by remember { mutableStateOf<List<Variable>>(emptyList()) }
     // Per-variable current-value overrides. Empty until user picks.
     val varOverrides = remember { mutableStateMapOf<String, List<String>>() }
@@ -293,6 +296,22 @@ fun DashboardDetailScreen(
                         .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
                 }
             }
+        }
+    }
+
+    // Shared refresh action for both the toolbar refresh button and the pull-to-refresh gesture.
+    val refreshPanels: suspend () -> Unit = {
+        refreshing = true
+        try {
+            expandedPanels.forEach { panel ->
+                panelData[panel.id] = null
+                container.dashboardRepository
+                    .queryPanel(panel, from = fromExpr, to = toExpr, variables = effectiveVars)
+                    .onSuccess { panelData[panel.id] = it }
+                    .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
+            }
+        } finally {
+            refreshing = false
         }
     }
 
@@ -396,17 +415,7 @@ fun DashboardDetailScreen(
                             }
                         }
                         RefreshMenu(refresh, onSelect = { refresh = it })
-                        IconButton(onClick = {
-                            scope.launch {
-                                expandedPanels.forEach { panel ->
-                                    panelData[panel.id] = null
-                                    container.dashboardRepository
-                                        .queryPanel(panel, from = fromExpr, to = toExpr, variables = effectiveVars)
-                                        .onSuccess { panelData[panel.id] = it }
-                                        .onFailure { panelData[panel.id] = PanelData(series = emptyList(), error = it.message) }
-                                }
-                            }
-                        }) {
+                        IconButton(onClick = { scope.launch { refreshPanels() } }) {
                             Icon(Icons.Filled.Refresh, contentDescription = "Refresh now")
                         }
                         IconButton(onClick = {
@@ -466,7 +475,13 @@ fun DashboardDetailScreen(
                     // Use side-by-side grid layout on wider screens; single column on narrow.
                     val useGrid = maxWidth > 600.dp
                     val bands = remember(expandedPanels, useGrid) { groupIntoRows(expandedPanels, useGrid) }
+                    PullToRefreshBox(
+                        isRefreshing = refreshing,
+                        onRefresh = { scope.launch { refreshPanels() } },
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
                     LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
@@ -565,6 +580,7 @@ fun DashboardDetailScreen(
                                 onEditQueries = { editQueriesPanel = it },
                             )
                         }
+                    }
                     }
                 }
             }
@@ -1054,11 +1070,27 @@ private fun VariablePickerDialog(
 ) {
     val selected = remember { mutableStateListOf<String>().apply { addAll(variable.current) } }
     var textValue by remember { mutableStateOf(variable.current.firstOrNull().orEmpty()) }
+    var query by remember { mutableStateOf("") }
     val title = variable.label?.takeIf { it.isNotBlank() } ?: variable.name
+
+    val visibleOptions = remember(query, variable.options) {
+        if (query.isBlank()) variable.options
+        else variable.options.filter {
+            it.text.contains(query, ignoreCase = true) || it.value.contains(query, ignoreCase = true)
+        }
+    }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(20.dp)) {
                 Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (variable.multi) {
+                    Text(
+                        "${selected.size} of ${variable.options.size} selected",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 when {
                     variable.type == "textbox" -> {
@@ -1084,8 +1116,31 @@ private fun VariablePickerDialog(
                         )
                     }
                     else -> {
+                        // Only bother with a search box once the list is long enough that scrolling hurts.
+                        if (variable.options.size > 8) {
+                            androidx.compose.material3.OutlinedTextField(
+                                value = query,
+                                onValueChange = { query = it },
+                                placeholder = { Text("Filter…") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                        if (variable.multi) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    // "All" toggles across the visible/filtered set only - matches Grafana's behavior.
+                                    visibleOptions.forEach { if (!selected.contains(it.value)) selected.add(it.value) }
+                                }) { Text("Select all") }
+                                androidx.compose.material3.TextButton(onClick = {
+                                    visibleOptions.forEach { selected.remove(it.value) }
+                                }) { Text("Clear") }
+                            }
+                        }
                         androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                            items(variable.options) { opt ->
+                            items(visibleOptions) { opt ->
                                 val checked = selected.contains(opt.value)
                                 Row(
                                     modifier = Modifier
@@ -1110,6 +1165,16 @@ private fun VariablePickerDialog(
                                     Text(opt.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                                 }
                             }
+                            if (visibleOptions.isEmpty()) {
+                                item {
+                                    Text(
+                                        "No matches",
+                                        modifier = Modifier.padding(vertical = 12.dp),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -1130,6 +1195,7 @@ private fun VariablePickerDialog(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun CustomTimeRangeDialog(
     initialFrom: String,
@@ -1137,8 +1203,18 @@ private fun CustomTimeRangeDialog(
     onDismiss: () -> Unit,
     onApply: (String, String) -> Unit,
 ) {
+    // If the incoming values look like ms epochs, start on the Absolute tab so the picker
+    // reflects what's already applied. Otherwise default to Relative (Grafana expressions).
+    val startAbsolute = initialFrom.toLongOrNull() != null && initialTo.toLongOrNull() != null
+    var tab by remember { mutableStateOf(if (startAbsolute) 1 else 0) }
+
     var from by remember { mutableStateOf(initialFrom) }
     var to by remember { mutableStateOf(initialTo) }
+
+    val nowMs = System.currentTimeMillis()
+    var fromMs by remember { mutableStateOf(initialFrom.toLongOrNull() ?: (nowMs - 6 * 60 * 60 * 1000L)) }
+    var toMs by remember { mutableStateOf(initialTo.toLongOrNull() ?: nowMs) }
+
     Dialog(onDismissRequest = onDismiss) {
         Card(
             shape = RoundedCornerShape(20.dp),
@@ -1146,45 +1222,176 @@ private fun CustomTimeRangeDialog(
         ) {
             Column(Modifier.padding(20.dp)) {
                 Text("Custom time range", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Use Grafana time expressions (now, now-6h, now-1d/d) or millisecond timestamps.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                )
-                Spacer(Modifier.height(12.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = from,
-                    onValueChange = { from = it },
-                    label = { Text("From") },
-                    placeholder = { Text("now-6h") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(8.dp))
-                androidx.compose.material3.OutlinedTextField(
-                    value = to,
-                    onValueChange = { to = it },
-                    label = { Text("To") },
-                    placeholder = { Text("now") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Spacer(Modifier.height(10.dp))
+
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        shape = SegmentedButtonDefaults.itemShape(0, 2),
+                        label = { Text("Relative") },
+                    )
+                    SegmentedButton(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        shape = SegmentedButtonDefaults.itemShape(1, 2),
+                        label = { Text("Absolute") },
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
+
+                if (tab == 0) {
+                    Text(
+                        "Grafana time expressions (now, now-6h, now-1d/d) or millisecond timestamps.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = from,
+                        onValueChange = { from = it },
+                        label = { Text("From") },
+                        placeholder = { Text("now-6h") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedTextField(
+                        value = to,
+                        onValueChange = { to = it },
+                        label = { Text("To") },
+                        placeholder = { Text("now") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(
+                            "Yesterday" to ("now-1d/d" to "now-1d/d"),
+                            "Today" to ("now/d" to "now"),
+                            "This week" to ("now/w" to "now"),
+                            "This month" to ("now/M" to "now"),
+                            "Last hour" to ("now-1h" to "now"),
+                        ).forEach { (label, pair) ->
+                            AssistChip(
+                                onClick = { from = pair.first; to = pair.second },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+                } else {
+                    DateTimeField("From", fromMs) { fromMs = it }
+                    Spacer(Modifier.height(8.dp))
+                    DateTimeField("To", toMs) { toMs = it }
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Absolute range: ${absoluteLabel(fromMs, toMs)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                }
+
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                     androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
                     Spacer(Modifier.width(8.dp))
                     androidx.compose.material3.Button(
                         onClick = {
-                            val f = from.trim()
-                            val t = to.trim()
-                            if (f.isNotBlank() && t.isNotBlank()) onApply(f, t)
+                            if (tab == 0) {
+                                val f = from.trim()
+                                val t = to.trim()
+                                if (f.isNotBlank() && t.isNotBlank()) onApply(f, t)
+                            } else {
+                                if (fromMs < toMs) onApply(fromMs.toString(), toMs.toString())
+                            }
                         },
                         colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EnergyOrange),
                     ) { Text("Apply") }
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimeField(label: String, epochMs: Long, onChange: (Long) -> Unit) {
+    var showDate by remember { mutableStateOf(false) }
+    var showTime by remember { mutableStateOf(false) }
+    val fmt = remember { java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, modifier = Modifier.width(52.dp), style = MaterialTheme.typography.bodyMedium)
+        AssistChip(
+            onClick = { showDate = true },
+            label = { Text(fmt.format(java.util.Date(epochMs))) },
+        )
+    }
+
+    if (showDate) {
+        val state = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = epochMs)
+        androidx.compose.material3.DatePickerDialog(
+            onDismissRequest = { showDate = false },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    val picked = state.selectedDateMillis
+                    if (picked != null) {
+                        // Compose DatePicker returns UTC-midnight; splice today's HH:mm from the current value.
+                        val cal = java.util.Calendar.getInstance().apply {
+                            timeInMillis = picked
+                            val prev = java.util.Calendar.getInstance().apply { timeInMillis = epochMs }
+                            set(java.util.Calendar.HOUR_OF_DAY, prev.get(java.util.Calendar.HOUR_OF_DAY))
+                            set(java.util.Calendar.MINUTE, prev.get(java.util.Calendar.MINUTE))
+                        }
+                        onChange(cal.timeInMillis)
+                    }
+                    showDate = false
+                    showTime = true
+                }) { Text("Next: time") }
+            },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { showDate = false }) { Text("Cancel") } },
+        ) {
+            androidx.compose.material3.DatePicker(state = state)
+        }
+    }
+
+    if (showTime) {
+        val cal = remember { java.util.Calendar.getInstance().apply { timeInMillis = epochMs } }
+        val state = androidx.compose.material3.rememberTimePickerState(
+            initialHour = cal.get(java.util.Calendar.HOUR_OF_DAY),
+            initialMinute = cal.get(java.util.Calendar.MINUTE),
+            is24Hour = true,
+        )
+        Dialog(onDismissRequest = { showTime = false }) {
+            Card(shape = RoundedCornerShape(20.dp)) {
+                Column(Modifier.padding(20.dp)) {
+                    androidx.compose.material3.TimePicker(state = state)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        androidx.compose.material3.TextButton(onClick = { showTime = false }) { Text("Cancel") }
+                        androidx.compose.material3.TextButton(onClick = {
+                            val c = java.util.Calendar.getInstance().apply {
+                                timeInMillis = epochMs
+                                set(java.util.Calendar.HOUR_OF_DAY, state.hour)
+                                set(java.util.Calendar.MINUTE, state.minute)
+                                set(java.util.Calendar.SECOND, 0)
+                            }
+                            onChange(c.timeInMillis)
+                            showTime = false
+                        }) { Text("OK") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun absoluteLabel(fromMs: Long, toMs: Long): String {
+    if (fromMs >= toMs) return "invalid (from >= to)"
+    val minutes = (toMs - fromMs) / 60_000L
+    return when {
+        minutes < 60 -> "$minutes min"
+        minutes < 24 * 60 -> "${minutes / 60}h ${minutes % 60}m"
+        else -> "${minutes / (24 * 60)}d ${(minutes % (24 * 60)) / 60}h"
     }
 }
 
@@ -1679,6 +1886,7 @@ private fun LazyListScope.renderGroupedPanels(
                     onExpand = onExpand,
                     onCopyLink = onCopyLink,
                     onOpenBrowser = onOpenBrowser,
+                    onEditQueries = onEditQueries,
                 )
             }
         }
