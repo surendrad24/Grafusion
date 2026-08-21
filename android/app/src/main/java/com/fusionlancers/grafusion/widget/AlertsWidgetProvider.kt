@@ -50,6 +50,8 @@ class AlertsWidgetProvider : AppWidgetProvider() {
             val top = firing.firstOrNull()
             val views = buildViews(context, count = firing.size, top = top)
             ids.forEach { id -> manager.updateAppWidget(id, views) }
+            // Push the same snapshot to any paired Wear device's tile.
+            com.fusionlancers.grafusion.wear.WearAlertsPublisher.publish(context, alerts)
         }
     }
 

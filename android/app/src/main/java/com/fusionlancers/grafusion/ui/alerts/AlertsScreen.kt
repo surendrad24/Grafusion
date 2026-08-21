@@ -91,13 +91,18 @@ fun AlertsScreen(container: AppContainer) {
     var selected by remember { mutableStateOf<Alert?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val appContext = LocalContext.current.applicationContext
 
     fun reload() {
         scope.launch {
             refreshing = true
             error = null
             container.alertRepository.fetchAlerts()
-                .onSuccess { alerts = it }
+                .onSuccess {
+                    alerts = it
+                    // Mirror the current firing count to any paired Wear tile.
+                    com.fusionlancers.grafusion.wear.WearAlertsPublisher.publish(appContext, it)
+                }
                 .onFailure { error = it.message ?: "Failed to load alerts" }
             // Silences are non-fatal: if the user can't see them we just hide the section.
             container.alertRepository.listSilences()

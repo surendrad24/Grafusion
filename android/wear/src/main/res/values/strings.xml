@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wear_app_name">Grafusion</string>
+    <string name="wear_tile_label">Grafana alerts</string>
+    <string name="tile_title">Grafana alerts</string>
+    <string name="tile_subtitle_firing">firing</string>
+    <string name="tile_subtitle_clear">all clear</string>
+    <string name="tile_pair_hint">Open phone app</string>
+</resources>

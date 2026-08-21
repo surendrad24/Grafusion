@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "GrafanaMobile"
 include(":app")
+include(":wear")

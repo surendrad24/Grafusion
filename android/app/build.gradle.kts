@@ -111,6 +111,10 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
     implementation("com.google.firebase:firebase-messaging-ktx")
 
+    // Wearable Data Layer - phone pushes alert snapshots to the Wear tile.
+    // Silently no-ops on devices with no paired watch.
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
+
     // Testing
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
