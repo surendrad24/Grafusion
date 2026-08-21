@@ -25,6 +25,7 @@ import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import com.fusionlancers.grafusion.ui.oncall.OnCallScreen
 import com.fusionlancers.grafusion.ui.permissions.PermissionsScreen
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -111,6 +112,9 @@ private fun AppNavHost(
         }
         composable(TopDest.Alerts.route) {
             AlertsScreen(container = container)
+        }
+        composable(TopDest.OnCall.route) {
+            OnCallScreen(container = container)
         }
         composable(TopDest.Accounts.route) {
             AccountsScreen(

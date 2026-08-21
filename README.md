@@ -88,6 +88,19 @@ Each dashboard runs `/api/ds/query` and native Compose renderers draw the result
 - **Tap an alert** for a detail sheet with labels, annotations and the source rule.
 - **Silence from mobile** for 30 minutes / 2 hours / 24 hours.
 
+### OnCall (Grafana OnCall plugin)
+Opt-in tab that appears when the **grafana-oncall-app** plugin is installed on your
+instance. Uses `/api/plugins/grafana-oncall-app/resources/*` through the same account
+auth as the rest of the app, so no separate OnCall token is required.
+
+- **Schedules**: list every schedule with the current on-call user badged as `NOW`
+  and the next ~6 upcoming shifts (final shifts, overrides highlighted).
+- **Incidents**: firing alert groups from OnCall with title, integration and age.
+- **Acknowledge** or **resolve** an incident from mobile.
+- Open any incident in Grafana via its permalink.
+- Graceful 404 handling - screen shows "OnCall plugin not installed" instead of
+  crashing when the plugin isn't present.
+
 ### Push notifications (backend relay)
 `backend/` is a Go service that turns Grafana Alertmanager webhooks into FCM pushes:
 
@@ -113,7 +126,7 @@ experience natively.
 | **M2** | Dashboard polish | shipped | Search / star / folder chips, pull-to-refresh, expanded panel renderer coverage |
 | **M3** | Panel editing | shipped | Move / resize / rename / duplicate / delete, add panel, row collapse |
 | **M4** | Alerts + push + security | shipped | Live Alertmanager list, silence 30m/2h/24h, Go relay -> FCM, biometric app lock, offline cache |
-| **M5** | On-call | planned | Grafana OnCall schedule view, current on-call badge, acknowledge / resolve incidents |
+| **M5** | On-call | shipped | Grafana OnCall schedule view, current on-call badge, acknowledge / resolve incidents |
 | **M6** | Explore & sharing | planned | Ad-hoc `/api/ds/query` view, share panel snapshots as PNG, dashboard variants |
 
 ## Architecture

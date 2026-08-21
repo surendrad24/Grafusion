@@ -74,7 +74,95 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
         @Body body: kotlinx.serialization.json.JsonObject,
     ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
+    // ---- Grafana OnCall plugin (optional; 404 when the plugin isn't installed) ----
+
+    @GET("api/plugins/grafana-oncall-app/resources/schedules/")
+    suspend fun onCallSchedules(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<OnCallPagedSchedules>
+
+    @GET("api/plugins/grafana-oncall-app/resources/schedules/{id}/final_shifts/")
+    suspend fun onCallFinalShifts(
+        @Header("Authorization") auth: String,
+        @Path("id") id: String,
+        @Query("start_date") startDate: String,
+        @Query("end_date") endDate: String,
+    ): retrofit2.Response<List<OnCallShift>>
+
+    @GET("api/plugins/grafana-oncall-app/resources/alert_groups/")
+    suspend fun onCallAlertGroups(
+        @Header("Authorization") auth: String,
+        @Query("state") state: String = "firing",
+    ): retrofit2.Response<OnCallPagedAlertGroups>
+
+    @POST("api/plugins/grafana-oncall-app/resources/alert_groups/{id}/acknowledge/")
+    suspend fun onCallAcknowledge(
+        @Header("Authorization") auth: String,
+        @Path("id") id: String,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
+    @POST("api/plugins/grafana-oncall-app/resources/alert_groups/{id}/resolve/")
+    suspend fun onCallResolve(
+        @Header("Authorization") auth: String,
+        @Path("id") id: String,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
 }
+
+@Serializable
+data class OnCallPagedSchedules(
+    val results: List<OnCallSchedule> = emptyList(),
+)
+
+@Serializable
+data class OnCallSchedule(
+    val id: String,
+    val name: String = "",
+    @SerialName("type") val type: String? = null,
+    @SerialName("on_call_now") val onCallNow: List<OnCallUser> = emptyList(),
+)
+
+@Serializable
+data class OnCallUser(
+    val pk: String? = null,
+    val username: String? = null,
+    val email: String? = null,
+    val avatar: String? = null,
+)
+
+@Serializable
+data class OnCallShift(
+    @SerialName("shift_start") val shiftStart: String? = null,
+    @SerialName("shift_end") val shiftEnd: String? = null,
+    val users: List<OnCallUser> = emptyList(),
+    @SerialName("is_gap") val isGap: Boolean = false,
+    @SerialName("is_override") val isOverride: Boolean = false,
+)
+
+@Serializable
+data class OnCallPagedAlertGroups(
+    val results: List<OnCallAlertGroup> = emptyList(),
+)
+
+@Serializable
+data class OnCallAlertGroup(
+    val pk: String,
+    @SerialName("alerts_count") val alertsCount: Int = 0,
+    @SerialName("status") val status: Int = 0,
+    val title: String? = null,
+    @SerialName("render_for_web") val renderForWeb: kotlinx.serialization.json.JsonObject? = null,
+    @SerialName("permalinks") val permalinks: OnCallPermalinks? = null,
+    @SerialName("integration_name") val integrationName: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("resolved") val resolved: Boolean = false,
+    @SerialName("acknowledged") val acknowledged: Boolean = false,
+    @SerialName("silenced") val silenced: Boolean = false,
+)
+
+@Serializable
+data class OnCallPermalinks(
+    val web: String? = null,
+)
 
 @Serializable
 data class AmAlert(
