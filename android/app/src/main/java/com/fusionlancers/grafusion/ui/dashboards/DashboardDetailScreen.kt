@@ -1848,6 +1848,12 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
         if (panel.type == "gauge") "none"
         else (panel.options?.get("graphMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "area"
     }
+    // When multiple series are returned (or the reducer emits per-row values in a table frame),
+    // Grafana lays them out as a grid of mini-stat cells instead of one big number.
+    if (data.series.size > 1) {
+        StatGrid(panel = panel, data = data, calc = calc, graphMode = graphMode, cardWidth = cardWidth)
+        return
+    }
     val firstSeries = data.series.firstOrNull()
     val seriesValues = firstSeries?.values?.filterNotNull().orEmpty()
     val frameValues = data.frames.firstOrNull()?.let { frame ->
@@ -1890,6 +1896,81 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun StatGrid(
+    panel: Panel,
+    data: PanelData,
+    calc: String,
+    graphMode: String,
+    cardWidth: Dp,
+) {
+    // Pick a column count that keeps each cell wide enough for a legible value.
+    val cols = when {
+        cardWidth < 220.dp -> 2
+        cardWidth < 360.dp -> 3
+        else -> 4
+    }
+    val cellWidth = ((cardWidth.value - 16f - (cols - 1) * 8f) / cols).coerceAtLeast(72f).dp
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        data.series.forEach { s ->
+            val values = s.values.filterNotNull()
+            val reduced = reduceStat(values, calc)
+            val display = reduced?.let { formatValue(it, panel.unit, panel.decimals) } ?: "-"
+            val approxCharDp = (cellWidth.value - 12f) / display.length.coerceAtLeast(1)
+            val fontSize = (approxCharDp * 1.9f).coerceIn(14f, 22f)
+            val sparklinePairs = if (graphMode == "area" || graphMode == "line") {
+                s.timestamps.zip(s.values).mapNotNull { (t, v) -> v?.let { t to it } }
+                    .takeIf { it.size >= 2 } ?: emptyList()
+            } else emptyList()
+            Column(
+                modifier = Modifier
+                    .width(cellWidth)
+                    .background(
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f),
+                        RoundedCornerShape(8.dp),
+                    )
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    s.name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(2.dp))
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    if (sparklinePairs.isNotEmpty()) {
+                        Sparkline(
+                            pairs = sparklinePairs,
+                            color = EnergyOrange,
+                            filled = graphMode == "area",
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    Text(
+                        display,
+                        fontSize = fontSize.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = EnergyOrange,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
