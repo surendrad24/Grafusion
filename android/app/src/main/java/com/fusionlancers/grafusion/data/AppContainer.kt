@@ -13,7 +13,9 @@ import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.data.repo.DatasourceRepository
 import com.fusionlancers.grafusion.data.repo.ExploreRepository
+import com.fusionlancers.grafusion.data.repo.LibraryRepository
 import com.fusionlancers.grafusion.data.repo.LokiTailClient
+import com.fusionlancers.grafusion.data.repo.ReportsRepository
 import com.fusionlancers.grafusion.data.repo.NotificationHistoryRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
@@ -88,6 +90,16 @@ class AppContainer(context: Context) {
     )
 
     val adminRepository = AdminRepository(
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
+    )
+
+    val libraryRepository = LibraryRepository(
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
+    )
+
+    val reportsRepository = ReportsRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
     )

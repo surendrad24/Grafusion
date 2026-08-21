@@ -31,7 +31,10 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -91,6 +94,9 @@ fun AccountsScreen(
     onOpenHistory: () -> Unit = {},
     onOpenDatasources: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
+    onOpenLibrary: () -> Unit = {},
+    onOpenReports: () -> Unit = {},
+    onOpenKiosk: () -> Unit = {},
 ) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
@@ -248,6 +254,36 @@ fun AccountsScreen(
                         Icon(Icons.Filled.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Grafana admin (users, teams, orgs)")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenLibrary,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.LibraryBooks, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Library panels + playlists")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenReports,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Description, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Reports (Enterprise)")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenKiosk,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Tv, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Kiosk / TV playlist mode")
                     }
                 }
             }

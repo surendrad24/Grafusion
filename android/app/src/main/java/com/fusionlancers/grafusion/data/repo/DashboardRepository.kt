@@ -457,6 +457,46 @@ class DashboardRepository(
         else -> expr // numeric timestamps or non-`now` expressions: leave alone
     }
 
+    /**
+     * Publish a snapshot of the current dashboard to the Grafana snapshot service.
+     * When [external] is true the snapshot goes to snapshots.raintank.io (public); when
+     * false it stays on the user's own Grafana. [expiresSeconds] = 0 means "never".
+     *
+     * Returns the shareable URL that the mobile OS share sheet can hand off.
+     */
+    suspend fun createSnapshot(
+        uid: String,
+        name: String? = null,
+        expiresSeconds: Long = 0,
+        external: Boolean = false,
+    ): Result<String> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val detail = api.dashboardByUid(auth, uid)
+        val dashboard = detail.dashboard
+
+        val body = buildJsonObject {
+            put("dashboard", dashboard)
+            if (!name.isNullOrBlank()) put("name", JsonPrimitive(name))
+            put("expires", JsonPrimitive(expiresSeconds))
+            put("external", JsonPrimitive(external))
+        }
+        val resp = api.createSnapshot(auth, body)
+        if (!resp.isSuccessful) {
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana role can't create snapshots"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+        val snap = resp.body() ?: error("empty response")
+        // Local snapshots come back as `/dashboard/snapshot/<key>` relative to the Grafana
+        // URL; external snapshots return an absolute snapshots.raintank.io URL.
+        if (snap.url.startsWith("http")) snap.url
+        else entity.grafanaUrl.trimEnd('/') + "/dashboard/snapshot/" + snap.key
+    }
+
     private fun refIdFor(idx: Int): String = ('A' + idx).toString()
 
     private fun mergeTarget(target: JsonObject, panel: Panel, refId: String): JsonElement = buildJsonObject {

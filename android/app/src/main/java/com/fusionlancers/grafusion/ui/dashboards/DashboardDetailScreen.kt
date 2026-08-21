@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.AddComment
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -70,6 +71,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -205,6 +208,7 @@ fun DashboardDetailScreen(
     var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
     var editQueriesPanel by remember { mutableStateOf<Panel?>(null) }
     var annotationSheetOpen by remember { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
     var offline by remember { mutableStateOf(false) }
     var variables by remember { mutableStateOf<List<Variable>>(emptyList()) }
     // Per-variable current-value overrides. Empty until user picks.
@@ -420,6 +424,23 @@ fun DashboardDetailScreen(
                             Icon(Icons.Filled.AddComment, contentDescription = "Add annotation")
                         }
                         IconButton(onClick = {
+                            scope.launch {
+                                val r = container.dashboardRepository.createSnapshot(uid = uid, name = title)
+                                r.onSuccess { url ->
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "Grafana snapshot: $title")
+                                        putExtra(Intent.EXTRA_TEXT, url)
+                                    }
+                                    context.startActivity(Intent.createChooser(send, "Share snapshot"))
+                                }.onFailure { err ->
+                                    snackbar.showSnackbar("Snapshot failed: ${err.message}")
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Filled.Share, contentDescription = "Share snapshot")
+                        }
+                        IconButton(onClick = {
                             browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
                         }) {
                             Icon(Icons.Filled.OpenInBrowser, contentDescription = "Open in browser")
@@ -434,6 +455,7 @@ fun DashboardDetailScreen(
                 ),
             )
         },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {

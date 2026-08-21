@@ -99,6 +99,47 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
     ): retrofit2.Response<List<GrafanaOrg>>
 
+    // ---- Library panels + playlists ----
+
+    @GET("api/library-elements")
+    suspend fun libraryElements(
+        @Header("Authorization") auth: String,
+        @Query("kind") kind: Int = 1, // 1 = panels
+        @Query("perPage") perPage: Int = 200,
+    ): retrofit2.Response<LibraryElementsResponse>
+
+    @GET("api/playlists")
+    suspend fun playlists(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<List<PlaylistSummary>>
+
+    @GET("api/playlists/{uid}")
+    suspend fun playlist(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+    ): retrofit2.Response<PlaylistDetail>
+
+    // ---- Reports (Grafana Enterprise) ----
+
+    @GET("api/reports")
+    suspend fun reports(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<List<GrafanaReport>>
+
+    @POST("api/reports/send-report/{id}")
+    suspend fun sendReport(
+        @Header("Authorization") auth: String,
+        @Path("id") id: Long,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
+    // ---- Snapshots ----
+
+    @POST("api/snapshots")
+    suspend fun createSnapshot(
+        @Header("Authorization") auth: String,
+        @Body body: kotlinx.serialization.json.JsonObject,
+    ): retrofit2.Response<SnapshotResponse>
+
     @POST("api/annotations")
     suspend fun createAnnotation(
         @Header("Authorization") auth: String,
@@ -423,6 +464,110 @@ data class GrafanaServiceAccount(
 data class GrafanaOrg(
     val id: Long = 0,
     val name: String = "",
+)
+
+@Serializable
+data class LibraryElementsResponse(
+    val result: LibraryElementsResult = LibraryElementsResult(),
+)
+
+@Serializable
+data class LibraryElementsResult(
+    val elements: List<LibraryElement> = emptyList(),
+    val totalCount: Int = 0,
+    val page: Int = 1,
+    val perPage: Int = 100,
+)
+
+@Serializable
+data class LibraryElement(
+    val id: Long = 0,
+    val uid: String = "",
+    val name: String = "",
+    val kind: Int = 1,
+    val type: String = "",
+    val description: String = "",
+    val folderUid: String? = null,
+    val meta: LibraryElementMeta = LibraryElementMeta(),
+)
+
+@Serializable
+data class LibraryElementMeta(
+    val folderName: String? = null,
+    val connectedDashboards: Int = 0,
+    val updated: String? = null,
+    val createdBy: LibraryElementUser = LibraryElementUser(),
+    val updatedBy: LibraryElementUser = LibraryElementUser(),
+)
+
+@Serializable
+data class LibraryElementUser(
+    val id: Long = 0,
+    val name: String = "",
+    val avatarUrl: String? = null,
+)
+
+@Serializable
+data class PlaylistSummary(
+    val id: Long = 0,
+    val uid: String,
+    val name: String,
+    val interval: String = "",
+)
+
+@Serializable
+data class PlaylistDetail(
+    val uid: String,
+    val name: String,
+    val interval: String = "",
+    val items: List<PlaylistItem> = emptyList(),
+)
+
+@Serializable
+data class PlaylistItem(
+    val type: String = "",
+    val value: String = "",
+    val title: String = "",
+)
+
+@Serializable
+data class GrafanaReport(
+    val id: Long = 0,
+    val name: String = "",
+    val state: String = "",
+    val recipients: String = "",
+    val subject: String = "",
+    val message: String = "",
+    val schedule: ReportSchedule = ReportSchedule(),
+    val dashboards: List<ReportDashboardRef> = emptyList(),
+)
+
+@Serializable
+data class ReportSchedule(
+    val frequency: String = "",
+    val startDate: String? = null,
+    val endDate: String? = null,
+    val timeZone: String? = null,
+)
+
+@Serializable
+data class ReportDashboardRef(
+    val dashboard: ReportDashboardRefInner? = null,
+)
+
+@Serializable
+data class ReportDashboardRefInner(
+    val uid: String? = null,
+    val name: String? = null,
+)
+
+@Serializable
+data class SnapshotResponse(
+    val key: String = "",
+    val deleteKey: String = "",
+    val url: String = "",
+    val deleteUrl: String = "",
+    val id: Long = 0,
 )
 
 @Serializable

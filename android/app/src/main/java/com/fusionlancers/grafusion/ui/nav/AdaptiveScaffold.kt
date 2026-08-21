@@ -31,6 +31,8 @@ import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
 import com.fusionlancers.grafusion.ui.explore.ExploreScreen
 import com.fusionlancers.grafusion.ui.history.NotificationHistoryScreen
+import com.fusionlancers.grafusion.ui.library.LibraryScreen
+import com.fusionlancers.grafusion.ui.reports.ReportsScreen
 import com.fusionlancers.grafusion.ui.oncall.OnCallScreen
 import com.fusionlancers.grafusion.ui.permissions.PermissionsScreen
 import java.net.URLDecoder
@@ -141,6 +143,9 @@ private fun AppNavHost(
                 onOpenHistory = { navController.navigate("notification_history") },
                 onOpenDatasources = { navController.navigate("datasources") },
                 onOpenAdmin = { navController.navigate("admin") },
+                onOpenLibrary = { navController.navigate("library") },
+                onOpenReports = { navController.navigate("reports") },
+                onOpenKiosk = { navController.navigate("kiosk") },
             )
         }
         composable("datasources") {
@@ -152,6 +157,28 @@ private fun AppNavHost(
         composable("admin") {
             AdminScreen(
                 container = container,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("library") {
+            LibraryScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("reports") {
+            ReportsScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("kiosk") {
+            com.fusionlancers.grafusion.ui.kiosk.KioskScreen(
+                container = container,
+                onOpenDashboard = { uid, title ->
+                    val safeTitle = URLEncoder.encode(title, "UTF-8")
+                    navController.navigate("dashboard/$uid?title=$safeTitle")
+                },
                 onBack = { navController.popBackStack() },
             )
         }
