@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
@@ -1400,6 +1401,7 @@ private fun PanelHeader(
         else -> MaterialTheme.typography.titleMedium
     }
     var menuOpen by remember { mutableStateOf(false) }
+    var descOpen by remember { mutableStateOf(false) }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             panel.title.ifBlank { "Panel ${panel.id}" },
@@ -1410,6 +1412,16 @@ private fun PanelHeader(
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+        if (!panel.description.isNullOrBlank()) {
+            IconButton(onClick = { descOpen = true }, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    Icons.Filled.Info,
+                    contentDescription = "Panel description",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         if (showTypeBadge) {
             Text(
                 panel.type,
@@ -1450,6 +1462,16 @@ private fun PanelHeader(
                 }
             }
         }
+    }
+    if (descOpen && !panel.description.isNullOrBlank()) {
+        AlertDialog(
+            onDismissRequest = { descOpen = false },
+            confirmButton = {
+                TextButton(onClick = { descOpen = false }) { Text("Close") }
+            },
+            title = { Text(panel.title.ifBlank { "Panel ${panel.id}" }) },
+            text = { Text(panel.description) },
+        )
     }
 }
 
@@ -1896,11 +1918,24 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
         if (pairs.size < 2) emptyList() else pairs
     }
 
+    val thresholds = remember(panel.thresholds) { parseThresholds(panel) }
+    val colorMode = remember(panel.options) {
+        (panel.options?.get("colorMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "value"
+    }
+    val valueColor = if (colorMode == "none" || latest == null) EnergyOrange
+    else thresholdColorFor(
+        value = latest,
+        thresholds = thresholds,
+        maxVal = panel.max ?: values.maxOrNull() ?: 1.0,
+        isPercent = panel.unit?.startsWith("percent") == true,
+        absolute = panel.thresholds.isNotEmpty(),
+    )
+
     Box(Modifier.fillMaxWidth().heightIn(min = 72.dp), contentAlignment = Alignment.Center) {
         if (sparklinePoints.isNotEmpty()) {
             Sparkline(
                 pairs = sparklinePoints,
-                color = EnergyOrange,
+                color = valueColor,
                 filled = graphMode == "area",
                 modifier = Modifier.fillMaxSize(),
             )
@@ -1909,7 +1944,7 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
             display,
             fontSize = fontSize.sp,
             fontWeight = FontWeight.Bold,
-            color = EnergyOrange,
+            color = valueColor,
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
@@ -1933,6 +1968,11 @@ private fun StatGrid(
         else -> 4
     }
     val cellWidth = ((cardWidth.value - 16f - (cols - 1) * 8f) / cols).coerceAtLeast(72f).dp
+    val thresholds = remember(panel.thresholds) { parseThresholds(panel) }
+    val colorMode = remember(panel.options) {
+        (panel.options?.get("colorMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "value"
+    }
+    val isPercent = panel.unit?.startsWith("percent") == true
     FlowRow(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1948,6 +1988,14 @@ private fun StatGrid(
                 s.timestamps.zip(s.values).mapNotNull { (t, v) -> v?.let { t to it } }
                     .takeIf { it.size >= 2 } ?: emptyList()
             } else emptyList()
+            val cellColor = if (colorMode == "none" || reduced == null) EnergyOrange
+            else thresholdColorFor(
+                value = reduced,
+                thresholds = thresholds,
+                maxVal = panel.max ?: values.maxOrNull() ?: 1.0,
+                isPercent = isPercent,
+                absolute = panel.thresholds.isNotEmpty(),
+            )
             Column(
                 modifier = Modifier
                     .width(cellWidth)
@@ -1972,7 +2020,7 @@ private fun StatGrid(
                     if (sparklinePairs.isNotEmpty()) {
                         Sparkline(
                             pairs = sparklinePairs,
-                            color = EnergyOrange,
+                            color = cellColor,
                             filled = graphMode == "area",
                             modifier = Modifier.fillMaxSize(),
                         )
@@ -1981,7 +2029,7 @@ private fun StatGrid(
                         display,
                         fontSize = fontSize.sp,
                         fontWeight = FontWeight.Bold,
-                        color = EnergyOrange,
+                        color = cellColor,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Ellipsis,
