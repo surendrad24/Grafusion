@@ -66,6 +66,12 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
     ): List<Datasource>
 
+    @POST("api/annotations")
+    suspend fun createAnnotation(
+        @Header("Authorization") auth: String,
+        @Body body: CreateAnnotationBody,
+    ): CreateAnnotationResponse
+
     @GET("api/annotations")
     suspend fun listAnnotations(
         @Header("Authorization") auth: String,
@@ -272,6 +278,22 @@ data class DashboardSummary(
     @SerialName("folderUid") val folderUid: String? = null,
     val tags: List<String> = emptyList(),
     val isStarred: Boolean = false,
+)
+
+@Serializable
+data class CreateAnnotationBody(
+    val dashboardUID: String? = null,
+    val panelId: Long? = null,
+    val time: Long,
+    val timeEnd: Long? = null,
+    val tags: List<String> = emptyList(),
+    val text: String,
+)
+
+@Serializable
+data class CreateAnnotationResponse(
+    val id: Long = 0,
+    val message: String? = null,
 )
 
 @Serializable

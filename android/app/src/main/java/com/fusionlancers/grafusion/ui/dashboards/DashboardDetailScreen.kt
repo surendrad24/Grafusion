@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.AddComment
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
@@ -203,6 +204,7 @@ fun DashboardDetailScreen(
     var dashboardId by remember { mutableStateOf<Long?>(null) }
     var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
     var editQueriesPanel by remember { mutableStateOf<Panel?>(null) }
+    var annotationSheetOpen by remember { mutableStateOf(false) }
     var offline by remember { mutableStateOf(false) }
     var variables by remember { mutableStateOf<List<Variable>>(emptyList()) }
     // Per-variable current-value overrides. Empty until user picks.
@@ -413,6 +415,9 @@ fun DashboardDetailScreen(
                             nextFreshId.value = ((sorted.maxOfOrNull { it.id } ?: 0L) + 1L).coerceAtLeast(1L)
                         }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Edit layout")
+                        }
+                        IconButton(onClick = { annotationSheetOpen = true }) {
+                            Icon(Icons.Filled.AddComment, contentDescription = "Add annotation")
                         }
                         IconButton(onClick = {
                             browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
@@ -633,6 +638,24 @@ fun DashboardDetailScreen(
         }
     }
 
+    if (annotationSheetOpen) {
+        AddAnnotationSheet(
+            onDismiss = { annotationSheetOpen = false },
+            onSubmit = { text, tags ->
+                scope.launch {
+                    container.alertRepository.createAnnotation(
+                        text = text,
+                        tags = tags,
+                        dashboardUid = uid,
+                    )
+                        .onSuccess { saveMessage = "Annotation added" }
+                        .onFailure { saveMessage = it.message ?: "Failed to add annotation" }
+                    annotationSheetOpen = false
+                }
+            },
+        )
+    }
+
     editQueriesPanel?.let { panel ->
         EditQueriesSheet(
             panel = panel,
@@ -658,6 +681,75 @@ fun DashboardDetailScreen(
             },
         )
     }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun AddAnnotationSheet(
+    onDismiss: () -> Unit,
+    onSubmit: (text: String, tags: List<String>) -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var text by remember { mutableStateOf("") }
+    var tagsInput by remember { mutableStateOf("") }
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(Modifier.padding(16.dp).fillMaxWidth()) {
+            Text(
+                "Add annotation",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Marks the current time on this dashboard's panels.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Description") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedIndicatorColor = EnergyOrange,
+                    cursorColor = EnergyOrange,
+                ),
+            )
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.material3.OutlinedTextField(
+                value = tagsInput,
+                onValueChange = { tagsInput = it },
+                label = { Text("Tags (comma-separated, optional)") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = androidx.compose.material3.TextFieldDefaults.colors(
+                    focusedIndicatorColor = EnergyOrange,
+                    cursorColor = EnergyOrange,
+                ),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Cancel")
+                }
+                androidx.compose.material3.Button(
+                    onClick = {
+                        val tags = tagsInput.split(",").map { it.trim() }.filter { it.isNotBlank() }
+                        onSubmit(text.trim(), tags)
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                    enabled = text.isNotBlank(),
+                ) {
+                    Text("Add")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 

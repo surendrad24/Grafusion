@@ -156,4 +156,32 @@ class AlertRepository(
         if (tags.isEmpty()) all
         else all.filter { ann -> ann.tags.any { it in tags } }
     }
+
+    /**
+     * Create an annotation on the active Grafana. Scoped by [dashboardUid] when provided;
+     * scoping to a single [panelId] on top of that pins the marker to one panel instead of
+     * the whole dashboard. [tags] doubles as the way Grafana attaches the annotation to
+     * dashboard-level tag queries.
+     */
+    suspend fun createAnnotation(
+        text: String,
+        tags: List<String> = emptyList(),
+        dashboardUid: String? = null,
+        panelId: Long? = null,
+        time: Long = System.currentTimeMillis(),
+        timeEnd: Long? = null,
+    ): Result<Long> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val body = com.fusionlancers.grafusion.data.api.CreateAnnotationBody(
+            dashboardUID = dashboardUid,
+            panelId = panelId,
+            time = time,
+            timeEnd = timeEnd,
+            tags = tags,
+            text = text,
+        )
+        api.createAnnotation(auth, body).id
+    }
 }
