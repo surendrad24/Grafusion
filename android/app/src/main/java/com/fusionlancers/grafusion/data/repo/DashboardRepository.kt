@@ -357,6 +357,79 @@ class DashboardRepository(
     }
 
     /**
+     * Replace a panel's query expressions in-place and save the dashboard back to Grafana.
+     *
+     * [newExprs] is refId -> new expr string. Only targets whose refId matches are touched;
+     * we rewrite the field Grafana expects for that datasource (`expr` for prometheus/loki,
+     * `query` otherwise). Callers can also change other target fields if the model grows;
+     * for now the sheet only exposes the primary expression, which is 90% of what phone users
+     * want to tweak (threshold %, label filter, time window).
+     */
+    suspend fun updatePanelQueries(
+        uid: String,
+        panelId: Long,
+        newExprs: Map<String, String>,
+    ): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val detail = api.dashboardByUid(auth, uid)
+        val dashboard = detail.dashboard
+        val originalPanels = dashboard["panels"]?.jsonArray ?: error("Dashboard has no panels array")
+
+        var touched = false
+        val rewritten = buildJsonArray {
+            originalPanels.forEach { el ->
+                val obj = el.jsonObject
+                val id = obj["id"]?.jsonPrimitive?.let { runCatching { it.content.toLong() }.getOrNull() }
+                if (id != panelId) { add(obj); return@forEach }
+                touched = true
+                val existingTargets = obj["targets"]?.jsonArray ?: JsonArray(emptyList())
+                val panelDsType = obj["datasource"]?.jsonObject?.get("type")?.jsonPrimitive
+                    ?.let { runCatching { it.content }.getOrNull() }.orEmpty().lowercase()
+                val newTargets = buildJsonArray {
+                    existingTargets.forEachIndexed { idx, t ->
+                        val tObj = t.jsonObject
+                        val refId = tObj["refId"]?.jsonPrimitive?.let { runCatching { it.content }.getOrNull() }
+                            ?: refIdFor(idx)
+                        val replacement = newExprs[refId]
+                        if (replacement == null) { add(tObj); return@forEachIndexed }
+                        val targetDsType = tObj["datasource"]?.jsonObject?.get("type")?.jsonPrimitive
+                            ?.let { runCatching { it.content }.getOrNull() }?.lowercase() ?: panelDsType
+                        add(buildJsonObject {
+                            tObj.forEach { (k, v) ->
+                                if (k == "expr" || k == "query") return@forEach
+                                put(k, v)
+                            }
+                            when (targetDsType) {
+                                "prometheus", "loki" -> put("expr", JsonPrimitive(replacement))
+                                else -> put("query", JsonPrimitive(replacement))
+                            }
+                        })
+                    }
+                }
+                add(buildJsonObject {
+                    obj.forEach { (k, v) -> if (k != "targets") put(k, v) }
+                    put("targets", newTargets)
+                })
+            }
+        }
+        if (!touched) error("Panel $panelId not found in dashboard $uid")
+
+        val newDashboard = buildJsonObject {
+            dashboard.forEach { (k, v) -> if (k != "panels") put(k, v) }
+            put("panels", rewritten)
+        }
+        val body = buildJsonObject {
+            put("dashboard", newDashboard)
+            put("overwrite", JsonPrimitive(true))
+            put("message", JsonPrimitive("Query edited from Grafusion mobile"))
+        }
+        val resp = api.saveDashboard(auth, body)
+        if (resp.status != null && resp.status != "success") error(resp.status)
+    }
+
+    /**
      * Apply per-panel time overrides. Grafana rules:
      *  - timeFrom "1h" -> from = now-1h, to unchanged.
      *  - timeShift "1d" -> both from and to get "-1d" arithmetically inserted after "now".

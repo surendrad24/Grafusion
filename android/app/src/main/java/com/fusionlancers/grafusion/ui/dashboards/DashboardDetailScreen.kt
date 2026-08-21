@@ -202,6 +202,7 @@ fun DashboardDetailScreen(
     var starred by remember { mutableStateOf<Boolean?>(null) }
     var dashboardId by remember { mutableStateOf<Long?>(null) }
     var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
+    var editQueriesPanel by remember { mutableStateOf<Panel?>(null) }
     var offline by remember { mutableStateOf(false) }
     var variables by remember { mutableStateOf<List<Variable>>(emptyList()) }
     // Per-variable current-value overrides. Empty until user picks.
@@ -534,6 +535,7 @@ fun DashboardDetailScreen(
                                 onExpand = { fullscreenPanel = it },
                                 onCopyLink = { url -> copyToClipboard(context, url) },
                                 onOpenBrowser = { url -> context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) },
+                                onEditQueries = { editQueriesPanel = it },
                             )
                         }
                     }
@@ -630,6 +632,107 @@ fun DashboardDetailScreen(
             }
         }
     }
+
+    editQueriesPanel?.let { panel ->
+        EditQueriesSheet(
+            panel = panel,
+            onDismiss = { editQueriesPanel = null },
+            onSave = { newExprs ->
+                scope.launch {
+                    saving = true
+                    val result = container.dashboardRepository.updatePanelQueries(uid, panel.id, newExprs)
+                    result
+                        .onSuccess {
+                            saveMessage = "Query saved"
+                            editQueriesPanel = null
+                            // Reload panels + re-run queries so the change is visible immediately.
+                            val pr = container.dashboardRepository.panelsFor(uid)
+                            panels = pr.panels
+                            groups = pr.groups
+                            variables = pr.variables
+                            panelData.clear()
+                        }
+                        .onFailure { saveMessage = it.message ?: "Save failed" }
+                    saving = false
+                }
+            },
+        )
+    }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun EditQueriesSheet(
+    panel: Panel,
+    onDismiss: () -> Unit,
+    onSave: (Map<String, String>) -> Unit,
+) {
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Seed editors with each target's current expression (expr for prom/loki, else query).
+    val editors = remember(panel.id) {
+        mutableStateListOf<Pair<String, androidx.compose.runtime.MutableState<String>>>().apply {
+            panel.targets.forEachIndexed { idx, t ->
+                val refId = (t["refId"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    ?: ('A' + idx).toString()
+                val current = ((t["expr"] as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    ?: (t["query"] as? kotlinx.serialization.json.JsonPrimitive)?.content).orEmpty()
+                add(refId to mutableStateOf(current))
+            }
+        }
+    }
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+    ) {
+        Column(Modifier.padding(16.dp).fillMaxWidth()) {
+            Text(
+                "Edit queries",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                panel.title.ifBlank { "Panel ${panel.id}" },
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+            if (editors.isEmpty()) {
+                Text(
+                    "This panel has no editable queries.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+            }
+            editors.forEach { (refId, state) ->
+                androidx.compose.material3.OutlinedTextField(
+                    value = state.value,
+                    onValueChange = { state.value = it },
+                    label = { Text("Query $refId") },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    minLines = 2,
+                    colors = androidx.compose.material3.TextFieldDefaults.colors(
+                        focusedIndicatorColor = EnergyOrange,
+                        cursorColor = EnergyOrange,
+                    ),
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f)) {
+                    Text("Cancel")
+                }
+                androidx.compose.material3.Button(
+                    onClick = { onSave(editors.associate { (r, s) -> r to s.value }) },
+                    modifier = Modifier.weight(1f),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                    enabled = editors.isNotEmpty(),
+                ) {
+                    Text("Save")
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 
@@ -685,6 +788,7 @@ private fun PanelRow(
     onExpand: (Panel) -> Unit,
     onCopyLink: (String) -> Unit,
     onOpenBrowser: (String) -> Unit,
+    onEditQueries: (Panel) -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -699,6 +803,7 @@ private fun PanelRow(
                     onExpand = { onExpand(panel) },
                     onCopyLink = grafanaUrl?.let { { onCopyLink(panelUrl(it, dashboardUid, panel.id)) } },
                     onOpenBrowser = grafanaUrl?.let { { onOpenBrowser(panelUrl(it, dashboardUid, panel.id)) } },
+                    onEditQueries = { onEditQueries(panel) },
                 )
             }
         }
@@ -1418,6 +1523,7 @@ private fun LazyListScope.renderGroupedPanels(
     onExpand: (Panel) -> Unit,
     onCopyLink: (String) -> Unit,
     onOpenBrowser: (String) -> Unit,
+    onEditQueries: (Panel) -> Unit,
 ) {
     if (groups.isEmpty()) {
         items(fallbackBands, key = { it.key }) { band ->
@@ -1429,6 +1535,7 @@ private fun LazyListScope.renderGroupedPanels(
                 onExpand = onExpand,
                 onCopyLink = onCopyLink,
                 onOpenBrowser = onOpenBrowser,
+                onEditQueries = onEditQueries,
             )
         }
         return
@@ -1508,6 +1615,7 @@ private fun PanelCard(
     onExpand: (() -> Unit)? = null,
     onCopyLink: (() -> Unit)? = null,
     onOpenBrowser: (() -> Unit)? = null,
+    onEditQueries: (() -> Unit)? = null,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1525,6 +1633,7 @@ private fun PanelCard(
                     onExpand = onExpand,
                     onCopyLink = onCopyLink,
                     onOpenBrowser = onOpenBrowser,
+                    onEditQueries = onEditQueries,
                 )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
                 val selfLoads = panel.type in setOf("alertlist", "dashlist", "annolist", "news", "text", "canvas")
@@ -1547,6 +1656,7 @@ private fun PanelHeader(
     onExpand: (() -> Unit)? = null,
     onCopyLink: (() -> Unit)? = null,
     onOpenBrowser: (() -> Unit)? = null,
+    onEditQueries: (() -> Unit)? = null,
 ) {
     val showTypeBadge = cardWidth >= 220.dp
     val titleStyle = when {
@@ -1586,7 +1696,7 @@ private fun PanelHeader(
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        if (onExpand != null || onCopyLink != null || onOpenBrowser != null) {
+        if (onExpand != null || onCopyLink != null || onOpenBrowser != null || onEditQueries != null) {
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Panel options", modifier = Modifier.size(18.dp))
@@ -1596,6 +1706,13 @@ private fun PanelHeader(
                         DropdownMenuItem(
                             text = { Text("Expand fullscreen") },
                             leadingIcon = { Icon(Icons.Filled.Fullscreen, null) },
+                            onClick = { menuOpen = false; it() },
+                        )
+                    }
+                    onEditQueries?.let {
+                        DropdownMenuItem(
+                            text = { Text("Edit queries") },
+                            leadingIcon = { Icon(Icons.Filled.Edit, null) },
                             onClick = { menuOpen = false; it() },
                         )
                     }
