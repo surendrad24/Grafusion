@@ -5,6 +5,7 @@ import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.PanelGroup
 import com.fusionlancers.grafusion.data.model.RawFrame
 import com.fusionlancers.grafusion.data.model.Series
+import com.fusionlancers.grafusion.data.model.Threshold
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -76,6 +77,10 @@ internal object PanelParser {
         val fieldConfig = obj["fieldConfig"]?.jsonObject?.get("defaults")?.jsonObject
         val unit = fieldConfig?.get("unit")?.jsonPrimitive?.contentOrNullSafe()
         val decimals = fieldConfig?.get("decimals")?.jsonPrimitive?.intOrNullSafe()
+        val min = fieldConfig?.get("min")?.jsonPrimitive?.doubleOrNullSafe()
+        val max = fieldConfig?.get("max")?.jsonPrimitive?.doubleOrNullSafe()
+        val thresholds = parseThresholds(fieldConfig)
+        val description = obj["description"]?.jsonPrimitive?.contentOrNullSafe()
         return Panel(
             id = id,
             title = title,
@@ -90,7 +95,26 @@ internal object PanelParser {
             unit = unit,
             decimals = decimals,
             options = obj["options"] as? JsonObject,
+            min = min,
+            max = max,
+            thresholds = thresholds,
+            description = description?.takeIf { it.isNotBlank() },
         )
+    }
+
+    private fun parseThresholds(fieldConfig: JsonObject?): List<Threshold> {
+        val steps = fieldConfig?.get("thresholds")?.jsonObject?.get("steps")?.jsonArray ?: return emptyList()
+        return steps.mapNotNull { step ->
+            val o = step as? JsonObject ?: return@mapNotNull null
+            val color = o["color"]?.jsonPrimitive?.contentOrNullSafe() ?: return@mapNotNull null
+            val valueEl = o["value"]
+            val value = when {
+                valueEl == null || valueEl is JsonNull -> null
+                valueEl is JsonPrimitive -> valueEl.doubleOrNullSafe()
+                else -> null
+            }
+            Threshold(value = value, color = color)
+        }
     }
 
     /**

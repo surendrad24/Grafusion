@@ -1451,7 +1451,8 @@ private fun PanelHeader(
 private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
     when (panel.type) {
         "timeseries", "graph" -> TimeseriesPanel(data)
-        "stat", "gauge" -> StatOrGaugePanel(panel, data, cardWidth)
+        "stat" -> StatOrGaugePanel(panel, data, cardWidth)
+        "gauge" -> GaugePanel(panel, data, cardWidth)
         "bargauge" -> BarGaugePanel(panel, data)
         "table" -> TablePanel(data)
         "barchart" -> BarChartPanel(panel, data)
@@ -1980,6 +1981,229 @@ private fun StatGrid(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun GaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
+    val calc = remember(panel.options) {
+        val reduce = panel.options?.get("reduceOptions") as? kotlinx.serialization.json.JsonObject
+        val calcs = reduce?.get("calcs") as? kotlinx.serialization.json.JsonArray
+        (calcs?.firstOrNull() as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "lastNotNull"
+    }
+    // Grafana gauge options: showThresholdLabels (default false), showThresholdMarkers (default true).
+    val showMarkers = ((panel.options?.get("showThresholdMarkers") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content?.toBooleanStrictOrNull()) ?: true
+    val showLabels = ((panel.options?.get("showThresholdLabels") as? kotlinx.serialization.json.JsonPrimitive)
+        ?.content?.toBooleanStrictOrNull()) ?: false
+
+    val cells = remember(data, calc) {
+        // One cell per series so multi-metric gauges (CPU + RAM + disk in one panel) all render.
+        data.series.mapNotNull { s ->
+            val v = reduceStat(s.values.filterNotNull(), calc) ?: return@mapNotNull null
+            s.name to v
+        }.ifEmpty {
+            val frame = data.frames.firstOrNull() ?: return@remember emptyList()
+            val numIdx = frame.fieldTypes.indexOfFirst { it == "number" }
+            if (numIdx < 0) return@remember emptyList()
+            val vals = frame.columns[numIdx].mapNotNull { (it as? Number)?.toDouble() }
+            listOfNotNull(reduceStat(vals, calc)?.let { frame.fieldNames.getOrNull(numIdx).orEmpty() to it })
+        }
+    }
+    if (cells.isEmpty()) { PanelNoData(); return }
+
+    val min = panel.min ?: 0.0
+    val fallbackMax = cells.maxOfOrNull { it.second } ?: 100.0
+    val max = panel.max ?: if (panel.unit == "percent" || panel.unit == "percentunit") 100.0 else fallbackMax
+    val thresholds = remember(panel) { parseThresholds(panel) }
+    val hasAbsThresholds = panel.thresholds.isNotEmpty()
+
+    if (cells.size == 1) {
+        val (name, v) = cells.first()
+        GaugeDial(
+            name = if (cells.size == 1 && name.isBlank()) null else null,
+            value = v,
+            min = min,
+            max = max,
+            panel = panel,
+            thresholds = thresholds,
+            hasAbsThresholds = hasAbsThresholds,
+            showMarkers = showMarkers,
+            showLabels = showLabels,
+            widthDp = cardWidth,
+        )
+        return
+    }
+    val cols = when {
+        cardWidth < 240.dp -> 2
+        cardWidth < 380.dp -> 3
+        else -> 4
+    }
+    val cellWidth = ((cardWidth.value - 16f - (cols - 1) * 8f) / cols).coerceAtLeast(90f).dp
+    FlowRow(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        cells.forEach { (name, v) ->
+            GaugeDial(
+                name = name,
+                value = v,
+                min = min,
+                max = max,
+                panel = panel,
+                thresholds = thresholds,
+                hasAbsThresholds = hasAbsThresholds,
+                showMarkers = showMarkers,
+                showLabels = false,
+                widthDp = cellWidth,
+                compact = true,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GaugeDial(
+    name: String?,
+    value: Double,
+    min: Double,
+    max: Double,
+    panel: Panel,
+    thresholds: List<UiThreshold>,
+    hasAbsThresholds: Boolean,
+    showMarkers: Boolean,
+    showLabels: Boolean,
+    widthDp: Dp,
+    compact: Boolean = false,
+) {
+    val span = (max - min).takeIf { kotlin.math.abs(it) > 0.0 } ?: 1.0
+    val frac = ((value - min) / span).coerceIn(0.0, 1.0).toFloat()
+    val isPercent = panel.unit == "percent" || panel.unit == "percentunit"
+    val valueColor = thresholdColorFor(value, thresholds, max, isPercent, absolute = hasAbsThresholds)
+    val display = formatValue(value, panel.unit, panel.decimals)
+    val dialSize = if (compact) 100.dp else 160.dp
+    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    Column(
+        modifier = Modifier
+            .width(widthDp)
+            .padding(vertical = 4.dp)
+            .then(if (compact) Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f), RoundedCornerShape(8.dp)).padding(6.dp) else Modifier),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        if (!name.isNullOrBlank()) {
+            Text(
+                name,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier.size(dialSize),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = size.minDimension * 0.14f
+                val inset = stroke / 2f + 2f
+                val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+                val arcSize = androidx.compose.ui.geometry.Size(size.width - inset * 2, size.height - inset * 2)
+                // Grafana gauge sweeps from 225° to -45° (270° total). We render a 3/4 ring.
+                val startAngle = 135f
+                val sweepTotal = 270f
+                // Background track.
+                drawArc(
+                    color = trackColor,
+                    startAngle = startAngle,
+                    sweepAngle = sweepTotal,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                    topLeft = topLeft,
+                    size = arcSize,
+                )
+                // Threshold segments (Grafana draws each threshold band into the ring).
+                if (showMarkers && thresholds.size >= 2) {
+                    val fractions = thresholdFractions(thresholds, min, max, hasAbsThresholds)
+                    for (i in 0 until fractions.size - 1) {
+                        val f0 = fractions[i].coerceIn(0f, 1f)
+                        val f1 = fractions[i + 1].coerceIn(0f, 1f)
+                        if (f1 <= f0) continue
+                        drawArc(
+                            color = thresholds[i].color.copy(alpha = 0.35f),
+                            startAngle = startAngle + sweepTotal * f0,
+                            sweepAngle = sweepTotal * (f1 - f0),
+                            useCenter = false,
+                            style = Stroke(width = stroke * 0.6f),
+                            topLeft = topLeft,
+                            size = arcSize,
+                        )
+                    }
+                    // Last band up to 100%.
+                    val fLast = fractions.last().coerceIn(0f, 1f)
+                    if (fLast < 1f) {
+                        drawArc(
+                            color = thresholds.last().color.copy(alpha = 0.35f),
+                            startAngle = startAngle + sweepTotal * fLast,
+                            sweepAngle = sweepTotal * (1f - fLast),
+                            useCenter = false,
+                            style = Stroke(width = stroke * 0.6f),
+                            topLeft = topLeft,
+                            size = arcSize,
+                        )
+                    }
+                }
+                // Value arc on top.
+                drawArc(
+                    color = valueColor,
+                    startAngle = startAngle,
+                    sweepAngle = sweepTotal * frac,
+                    useCenter = false,
+                    style = Stroke(width = stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                    topLeft = topLeft,
+                    size = arcSize,
+                )
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    display,
+                    fontSize = (if (compact) 16f else 22f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = valueColor,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (!compact && showLabels) {
+                    Text(
+                        "${formatValue(min, panel.unit, panel.decimals)} - ${formatValue(max, panel.unit, panel.decimals)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Map threshold values into 0..1 fractions of the gauge range so we can draw each band along
+ * the arc. When [absolute] the value is compared against [min]..[max] directly; otherwise it's
+ * already a fraction. The first threshold ("null" baseline) always starts at 0.
+ */
+private fun thresholdFractions(
+    thresholds: List<UiThreshold>,
+    min: Double,
+    max: Double,
+    absolute: Boolean,
+): List<Float> {
+    if (thresholds.isEmpty()) return emptyList()
+    val span = (max - min).takeIf { kotlin.math.abs(it) > 0.0 } ?: 1.0
+    return thresholds.map { t ->
+        val v = t.value ?: return@map 0f
+        val f = if (absolute) ((v - min) / span) else v
+        f.coerceIn(0.0, 1.0).toFloat()
+    }
+}
+
 @Composable
 private fun Sparkline(
     pairs: List<Pair<Long, Double>>,
@@ -2097,7 +2321,7 @@ private fun BarGaugePanel(panel: Panel, data: PanelData) {
 private fun BarGaugeBar(
     frac: Float,
     displayMode: String,
-    thresholds: List<Threshold>,
+    thresholds: List<UiThreshold>,
     maxVal: Double,
     isPercent: Boolean,
     valueColor: Color,
@@ -2160,38 +2384,90 @@ private fun BarGaugeBar(
     }
 }
 
-private data class Threshold(val value: Double?, val color: Color)
+private data class UiThreshold(val value: Double?, val color: Color)
 
 /**
- * Extract fieldConfig.defaults.thresholds.steps from a panel. Falls back to a
- * green -> yellow -> red default (matching Grafana's out-of-the-box scheme)
- * when the panel didn't declare its own so gradient/lcd modes still look right.
+ * Convert panel.thresholds (parsed from fieldConfig.defaults.thresholds.steps) into UI-side
+ * (value, Color) pairs. When the panel didn't declare any, fall back to Grafana's default
+ * green -> yellow -> red ramp interpreted as fractions of the observed max so gradient/LCD
+ * modes still have a color story.
  */
-private fun parseThresholds(@Suppress("UNUSED_PARAMETER") panel: Panel): List<Threshold> {
-    // Real thresholds live under fieldConfig.defaults.thresholds.steps - PanelParser doesn't
-    // surface fieldConfig yet, so we return Grafana's default green/yellow/red ramp so gradient
-    // and LCD modes still have a color story. Follow-up: expose fieldConfig from PanelParser.
+private fun parseThresholds(panel: Panel): List<UiThreshold> {
+    if (panel.thresholds.isNotEmpty()) {
+        return panel.thresholds.map { UiThreshold(it.value, grafanaColor(it.color)) }
+    }
     return listOf(
-        Threshold(null, Color(0xFF2ECC71)),
-        Threshold(0.6, Color(0xFFF1C40F)),
-        Threshold(0.85, Color(0xFFE74C3C)),
+        UiThreshold(null, Color(0xFF2ECC71)),
+        UiThreshold(0.6, Color(0xFFF1C40F)),
+        UiThreshold(0.85, Color(0xFFE74C3C)),
     )
 }
 
+/**
+ * Pick the color for [value] from a threshold ladder. When the panel provided real thresholds,
+ * their [value]s are absolute (Grafana mode="absolute" - percentage mode is uncommon and we treat
+ * it identically here since our synthetic default already uses fractions). When the panel didn't
+ * provide any, the default ramp values are 0..1 fractions of maxVal (or 0..100 when the unit is a
+ * percent so the ramp lines up with what people expect).
+ */
 private fun thresholdColorFor(
     value: Double,
-    thresholds: List<Threshold>,
+    thresholds: List<UiThreshold>,
     maxVal: Double,
     isPercent: Boolean,
+    absolute: Boolean = false,
 ): Color {
     if (thresholds.isEmpty()) return EnergyOrange
-    val frac = if (isPercent) value / 100.0 else if (maxVal > 0) value / maxVal else 0.0
+    val probe = when {
+        absolute -> value
+        isPercent -> value / 100.0
+        maxVal > 0 -> value / maxVal
+        else -> 0.0
+    }
     var color = thresholds.first().color
     for (t in thresholds) {
         val threshold = t.value ?: continue
-        if (frac >= threshold) color = t.color
+        if (probe >= threshold) color = t.color
     }
     return color
+}
+
+/**
+ * Resolve a Grafana color token to a Compose Color. Handles named palette entries Grafana ships
+ * ("green", "red", "semi-dark-orange", ...), hex ("#ff8800"), rgba(...), and anything unrecognized
+ * falls back to Energy Orange so a mis-parsed token never turns the panel invisible.
+ */
+private fun grafanaColor(token: String): Color {
+    val t = token.trim()
+    if (t.startsWith("#")) {
+        return runCatching {
+            val hex = t.removePrefix("#")
+            when (hex.length) {
+                6 -> Color(android.graphics.Color.parseColor("#FF$hex"))
+                8 -> Color(android.graphics.Color.parseColor("#$hex"))
+                else -> EnergyOrange
+            }
+        }.getOrDefault(EnergyOrange)
+    }
+    if (t.startsWith("rgb", ignoreCase = true)) {
+        return runCatching { Color(android.graphics.Color.parseColor(t)) }.getOrDefault(EnergyOrange)
+    }
+    val key = t.lowercase().removePrefix("semi-dark-").removePrefix("light-").removePrefix("dark-").removePrefix("super-light-")
+    return when (key) {
+        "green" -> Color(0xFF10B981)
+        "yellow" -> Color(0xFFFACC15)
+        "orange" -> Color(0xFFF59E0B)
+        "red" -> Color(0xFFEF4444)
+        "blue" -> Color(0xFF60A5FA)
+        "purple" -> Color(0xFF8B5CF6)
+        "pink" -> Color(0xFFF472B6)
+        "brown" -> Color(0xFF92400E)
+        "gray", "grey" -> Color(0xFF9CA3AF)
+        "white" -> Color.White
+        "black" -> Color.Black
+        "transparent" -> Color.Transparent
+        else -> EnergyOrange
+    }
 }
 
 @Composable

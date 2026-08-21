@@ -24,6 +24,18 @@ data class Panel(
     val unit: String?,
     val decimals: Int?,
     val options: JsonObject? = null,
+    val min: Double? = null,
+    val max: Double? = null,
+    val thresholds: List<Threshold> = emptyList(),
+    val description: String? = null,
+)
+
+/** One step from Grafana fieldConfig.defaults.thresholds.steps. */
+data class Threshold(
+    /** Cutoff value; null means "-infinity" (baseline). */
+    val value: Double?,
+    /** Grafana color token: "green", "red", "#ff8800", "rgba(...)", ... */
+    val color: String,
 )
 
 /** One time-series returned by /api/ds/query - timestamps aligned with values. */
