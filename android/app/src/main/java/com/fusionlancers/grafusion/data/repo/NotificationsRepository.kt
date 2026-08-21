@@ -11,10 +11,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 /**
  * Registers this device with the Go relay so Grafana webhook alerts can fan out to it.
  *
- * The relay's /v1/devices endpoint expects {fcm_token, grafana_url, grafana_user}. Until
- * Firebase is provisioned we use the stable device_id from NotificationPreferences as the
- * fcm_token - the relay treats it as an opaque routing key. Real FCM tokens will replace it
- * transparently once GrafusionMessagingService is wired.
+ * The relay's /v1/devices endpoint expects {fcm_token, grafana_url, grafana_user}. When
+ * google-services.json is present GrafusionMessagingService stores a real FCM token in
+ * NotificationPreferences; otherwise we fall back to the stable device_id stub. Either
+ * way the relay treats the field as an opaque routing key.
  */
 class NotificationsRepository(
     private val accountRepository: AccountRepository,
@@ -28,7 +28,7 @@ class NotificationsRepository(
         if (config.relayUrl.isBlank()) error("Set the relay URL first")
         val entity = accountRepository.activeEntity() ?: error("Sign in to a Grafana account first")
 
-        val body = """{"fcm_token":${q(config.deviceId)},"grafana_url":${q(entity.grafanaUrl)},"grafana_user":${q(entity.login)}}"""
+        val body = """{"fcm_token":${q(config.routingToken)},"grafana_url":${q(entity.grafanaUrl)},"grafana_user":${q(entity.login)}}"""
             .toRequestBody("application/json".toMediaType())
         val req = Request.Builder()
             .url(config.relayUrl.trimEnd('/') + "/v1/devices")

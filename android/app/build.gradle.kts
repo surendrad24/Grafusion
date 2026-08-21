@@ -1,9 +1,18 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
+}
+
+// Google-services plugin needs google-services.json. Apply it only when the file
+// is present so the repo stays buildable without a Firebase project.
+val hasGoogleServices = File(projectDir, "google-services.json").exists()
+if (hasGoogleServices) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 android {
@@ -16,6 +25,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+        buildConfigField("boolean", "FIREBASE_AVAILABLE", hasGoogleServices.toString())
     }
 
     buildTypes {
@@ -36,6 +46,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -94,6 +105,11 @@ dependencies {
 
     // OSM-based map for geomap panels (no API key, MIT-licensed)
     implementation("org.osmdroid:osmdroid-android:6.1.20")
+
+    // Firebase Cloud Messaging - SDK is always compiled in; runtime uses it
+    // only when google-services.json is present (see BuildConfig.FIREBASE_AVAILABLE).
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-messaging-ktx")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

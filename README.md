@@ -180,6 +180,22 @@ Then in Grafana: **Alerting -> Contact points -> New -> Webhook**, URL
 `https://your-relay.example.com/v1/webhook/grafana`, attach it to a notification policy.
 See `backend/README.md` for env vars.
 
+### Firebase Cloud Messaging (optional, for real push delivery)
+
+The Android app compiles fine without Firebase - it falls back to a device-ID stub for the
+relay's routing key and simply won't receive pushes. To turn on real FCM delivery:
+
+1. Create a Firebase project and register an Android app with package
+   `com.fusionlancers.grafusion`.
+2. Download `google-services.json` and drop it into `android/app/`. The Gradle build
+   detects the file and enables the `google-services` plugin automatically.
+3. In the relay, set `FCM_CREDENTIALS_JSON` to a service-account key from the same
+   Firebase project (see `backend/README.md`).
+4. Rebuild and reinstall. On first launch `GrafusionMessagingService.onNewToken` writes
+   the FCM token into `NotificationPreferences`, and `NotificationsRepository`
+   re-registers the device with the relay so subsequent Grafana webhooks are delivered as
+   system notifications on the "Grafana alerts" channel.
+
 ## Screenshots
 
 _Coming soon - will be added under `docs/images/` once the M5 UI stabilizes._

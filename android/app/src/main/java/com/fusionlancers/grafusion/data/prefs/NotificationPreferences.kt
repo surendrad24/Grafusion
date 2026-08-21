@@ -12,10 +12,14 @@ import java.util.UUID
 data class NotificationConfig(
     val relayUrl: String,
     val deviceId: String,
+    val fcmToken: String?,
     val lastRegisteredAt: Long,
     val lastRegisterOk: Boolean,
     val lastRegisterError: String?,
-)
+) {
+    /** The routing key sent to the relay: real FCM token when present, device ID stub otherwise. */
+    val routingToken: String get() = fcmToken?.takeIf { it.isNotBlank() } ?: deviceId
+}
 
 class NotificationPreferences(context: Context) {
 
@@ -26,6 +30,7 @@ class NotificationPreferences(context: Context) {
     fun current(): NotificationConfig = NotificationConfig(
         relayUrl = prefs.getString(KEY_RELAY, "").orEmpty(),
         deviceId = deviceId(),
+        fcmToken = prefs.getString(KEY_FCM_TOKEN, null),
         lastRegisteredAt = prefs.getLong(KEY_LAST_AT, 0L),
         lastRegisterOk = prefs.getBoolean(KEY_LAST_OK, false),
         lastRegisterError = prefs.getString(KEY_LAST_ERR, null),
@@ -33,6 +38,10 @@ class NotificationPreferences(context: Context) {
 
     fun setRelayUrl(url: String) {
         prefs.edit().putString(KEY_RELAY, url.trim().trimEnd('/')).apply()
+    }
+
+    fun setFcmToken(token: String?) {
+        prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
     }
 
     fun recordRegistration(ok: Boolean, error: String?) {
@@ -66,6 +75,7 @@ class NotificationPreferences(context: Context) {
     companion object {
         private const val KEY_RELAY = "relay_url"
         private const val KEY_DEVICE_ID = "device_id"
+        private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_LAST_AT = "last_register_at"
         private const val KEY_LAST_OK = "last_register_ok"
         private const val KEY_LAST_ERR = "last_register_err"

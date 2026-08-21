@@ -34,5 +34,19 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
             android:theme="@style/Theme.Grafusion" />
+
+        <!-- Firebase Cloud Messaging receiver. Only invoked when the FCM SDK is
+             initialized (requires google-services.json to be present at build time). -->
+        <service
+            android:name=".push.GrafusionMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="grafusion_alerts" />
     </application>
 </manifest>
