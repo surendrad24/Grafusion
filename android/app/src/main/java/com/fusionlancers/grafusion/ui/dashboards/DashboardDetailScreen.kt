@@ -1935,10 +1935,15 @@ private fun BarGaugePanel(panel: Panel, data: PanelData) {
     // Bar range: percent units use 0..100; otherwise scale to max value.
     val isPercent = panel.unit?.startsWith("percent") == true
     val maxVal = if (isPercent) 100.0 else (rows.maxOf { it.second }.takeIf { it > 0 } ?: 1.0)
+    // Grafana's displayMode: "basic" (solid) | "gradient" (color grade) | "lcd" (retro LED cells).
+    val displayMode = (panel.options?.get("displayMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "gradient"
+    val thresholds = remember(panel) { parseThresholds(panel) }
+
     Column(Modifier.fillMaxWidth()) {
         rows.take(12).forEach { (label, v) ->
             val frac = (v / maxVal).coerceIn(0.0, 1.0).toFloat()
             val display = formatValue(v, panel.unit, panel.decimals)
+            val valueColor = thresholdColorFor(v, thresholds, maxVal, isPercent)
             Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
@@ -1954,23 +1959,123 @@ private fun BarGaugePanel(panel: Panel, data: PanelData) {
                         display,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = EnergyOrange,
+                        color = valueColor,
                         maxLines = 1,
                     )
                 }
                 Spacer(Modifier.height(3.dp))
-                Box(
-                    Modifier.fillMaxWidth().height(10.dp)
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), RoundedCornerShape(4.dp))
-                ) {
+                BarGaugeBar(
+                    frac = frac,
+                    displayMode = displayMode,
+                    thresholds = thresholds,
+                    maxVal = maxVal,
+                    isPercent = isPercent,
+                    valueColor = valueColor,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarGaugeBar(
+    frac: Float,
+    displayMode: String,
+    thresholds: List<Threshold>,
+    maxVal: Double,
+    isPercent: Boolean,
+    valueColor: Color,
+) {
+    val trackColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
+    when (displayMode) {
+        "lcd" -> {
+            // 20 discrete "LED" cells that light up left-to-right.
+            val cells = 20
+            val lit = (frac * cells).toInt().coerceIn(0, cells)
+            Row(
+                Modifier.fillMaxWidth().height(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+            ) {
+                repeat(cells) { i ->
+                    // Each cell picks its own threshold color based on the fraction it represents,
+                    // so a bar can grade from green -> yellow -> red across its length.
+                    val cellFrac = (i + 0.5f) / cells
+                    val cellVal = cellFrac * maxVal
+                    val cellColor = if (i < lit)
+                        thresholdColorFor(cellVal, thresholds, maxVal, isPercent).copy(alpha = 0.9f)
+                    else
+                        trackColor
                     Box(
-                        Modifier.fillMaxWidth(frac).height(10.dp)
-                            .background(EnergyOrange, RoundedCornerShape(4.dp))
+                        Modifier
+                            .weight(1f)
+                            .height(12.dp)
+                            .background(cellColor, RoundedCornerShape(1.dp))
                     )
                 }
             }
         }
+        "gradient" -> {
+            // Continuous color grade using threshold stops as gradient anchors.
+            val stops = if (thresholds.size >= 2) thresholds.map { it.color } else listOf(valueColor, valueColor)
+            Box(
+                Modifier.fillMaxWidth().height(10.dp)
+                    .background(trackColor, RoundedCornerShape(4.dp))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(frac)
+                        .height(10.dp)
+                        .background(Brush.horizontalGradient(stops), RoundedCornerShape(4.dp))
+                )
+            }
+        }
+        else -> {
+            // "basic" (solid, threshold-tinted).
+            Box(
+                Modifier.fillMaxWidth().height(10.dp)
+                    .background(trackColor, RoundedCornerShape(4.dp))
+            ) {
+                Box(
+                    Modifier.fillMaxWidth(frac).height(10.dp)
+                        .background(valueColor, RoundedCornerShape(4.dp))
+                )
+            }
+        }
     }
+}
+
+private data class Threshold(val value: Double?, val color: Color)
+
+/**
+ * Extract fieldConfig.defaults.thresholds.steps from a panel. Falls back to a
+ * green -> yellow -> red default (matching Grafana's out-of-the-box scheme)
+ * when the panel didn't declare its own so gradient/lcd modes still look right.
+ */
+private fun parseThresholds(@Suppress("UNUSED_PARAMETER") panel: Panel): List<Threshold> {
+    // Real thresholds live under fieldConfig.defaults.thresholds.steps - PanelParser doesn't
+    // surface fieldConfig yet, so we return Grafana's default green/yellow/red ramp so gradient
+    // and LCD modes still have a color story. Follow-up: expose fieldConfig from PanelParser.
+    return listOf(
+        Threshold(null, Color(0xFF2ECC71)),
+        Threshold(0.6, Color(0xFFF1C40F)),
+        Threshold(0.85, Color(0xFFE74C3C)),
+    )
+}
+
+private fun thresholdColorFor(
+    value: Double,
+    thresholds: List<Threshold>,
+    maxVal: Double,
+    isPercent: Boolean,
+): Color {
+    if (thresholds.isEmpty()) return EnergyOrange
+    val frac = if (isPercent) value / 100.0 else if (maxVal > 0) value / maxVal else 0.0
+    var color = thresholds.first().color
+    for (t in thresholds) {
+        val threshold = t.value ?: continue
+        if (frac >= threshold) color = t.color
+    }
+    return color
 }
 
 @Composable
