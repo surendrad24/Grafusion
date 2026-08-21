@@ -36,7 +36,10 @@ The Android app runs against any self-hosted Grafana instance today. What is shi
 - Auth: username/password **or** API token (`Bearer`) - pick per account.
 - Credentials stored in `EncryptedSharedPreferences` (AES-256-GCM master key).
 - `/api/user` used to verify credentials on add.
+- **TLS certificate pinning** per Grafana instance: fetch the leaf cert on demand,
+  confirm the SPKI SHA-256 fingerprint (TOFU), pin via OkHttp's `CertificatePinner`.
 - **App lock**: optional PIN (PBKDF2-hashed) + `BiometricPrompt` fingerprint gate on launch.
+- **Theme + home dashboard sync** from `/api/user/preferences` on account switch.
 - Runtime **permissions onboarding** screen for `POST_NOTIFICATIONS` (Android 13+).
 
 ### Dashboards
@@ -49,8 +52,18 @@ The Android app runs against any self-hosted Grafana instance today. What is shi
 - Responsive layout: on tablets (>600 dp) panels honor their `gridPos` and render
   **side-by-side** exactly like the Grafana web grid; phones stack.
 - **Auto-refresh** in the top bar: Off / 5 s / 10 s / 30 s / 1 min / 5 min / 15 min.
-- **Time-range selector**: last 15 min / 1 h / 6 h / 24 h / 7 d.
+- **Time-range selector**: last 15 min / 1 h / 6 h / 24 h / 7 d, plus a custom
+  Relative/Absolute picker with real date + time fields and preset chips.
+- **Dashboard variables** including multi-select with search filter, Select-all
+  / Clear affordances and a live "N of M selected" counter. `repeat=varname`
+  panels are expanded into one clone per selected value.
+- **Annotations**: add and edit annotations directly from the mobile toolbar.
+- **Snapshot sharing**: publish a Grafana snapshot from the toolbar and share
+  the link via the system share sheet.
+- **Star / unstar** dashboards from the detail view.
 - **Row collapse / expand** with `type=row` headers preserved from the dashboard JSON.
+- **`grafana://` deep links**: `grafana://d/<uid>` or `grafana://dashboard/<uid>`
+  jump straight to the dashboard.
 
 ### Dashboard edit mode
 Tap the pencil to enter an in-place editor that persists back through
@@ -61,6 +74,7 @@ Tap the pencil to enter an in-place editor that persists back through
 - **Rename** panels inline.
 - **Duplicate** or **delete** panels from a per-panel menu.
 - **Add panel** bottom sheet - pick from all supported renderer types.
+- **Edit panel queries** (targets, datasource, expression) inline before saving.
 - Dirty-count badge on the save icon; discard confirm on close when unsaved.
 
 ### Panel renderers (native, no WebView)
@@ -78,6 +92,13 @@ Each dashboard runs `/api/ds/query` and native Compose renderers draw the result
 - **logs** - auto-detects `Line` / `Body` field, scrollable log view.
 - **text** - markdown/plain text panels.
 - **geomap / worldmap-panel** - map with pinned points (MapLibre-style renderer).
+- **news** - RSS/Atom feed, parses `<enclosure>`, `<media:*>` and inline `<img>`
+  for per-item thumbnails.
+- **canvas** - rectangles, ellipses and text elements rendered natively via
+  Compose `Canvas` + `TextMeasurer`.
+- **node graph** - node + edge summary with counts (no force-directed solver).
+- **flamegraph** - depth-tinted horizontal bars from pyroscope / flamegraph frames.
+- **traces (Tempo / Jaeger)** - span rows with duration bars sorted by start time.
 - **row** - collapsible / flat row grouping.
 - Unsupported types fall through to a labeled placeholder instead of breaking the dashboard.
 
@@ -87,6 +108,24 @@ Each dashboard runs `/api/ds/query` and native Compose renderers draw the result
 - Firing / Pending / Normal state indicators.
 - **Tap an alert** for a detail sheet with labels, annotations and the source rule.
 - **Silence from mobile** for 30 minutes / 2 hours / 24 hours.
+- **Home-screen widget** (`AlertsWidgetProvider`) shows the current firing count
+  and taps through to the Alerts tab via `pendingStartRoute`.
+- **Wear OS tile** mirrors the firing count via the Wearable Data API; the
+  companion `AlertsDataListenerService` writes to SharedPreferences and asks
+  the Wear system to refresh the tile.
+
+### Explore
+- Ad-hoc query tab for **PromQL, LogQL, TraceQL** and raw expressions.
+- **Loki live-tail** over WebSocket for streaming log inspection.
+- Result rendering reuses the dashboard's native panel renderers.
+
+### Data sources, admin, library, reports, kiosk
+- **Data sources** screen enumerates `/api/datasources`, shows type + URL and
+  lets you drill into per-datasource actions.
+- **Admin, Library, Reports** screens surface `/api/admin/*`, library panels
+  and reporting endpoints for operators.
+- **Kiosk** view rotates through a curated set of dashboards for wall displays.
+- **Notification history** screen persists past alert deliveries locally.
 
 ### OnCall (Grafana OnCall plugin)
 Opt-in tab that appears when the **grafana-oncall-app** plugin is installed on your
@@ -127,25 +166,38 @@ experience natively.
 | **M3** | Panel editing | shipped | Move / resize / rename / duplicate / delete, add panel, row collapse |
 | **M4** | Alerts + push + security | shipped | Live Alertmanager list, silence 30m/2h/24h, Go relay -> FCM, biometric app lock, offline cache |
 | **M5** | On-call | shipped | Grafana OnCall schedule view, current on-call badge, acknowledge / resolve incidents |
-| **M6** | Explore & sharing | planned | Ad-hoc `/api/ds/query` view, share panel snapshots as PNG, dashboard variants |
+| **M6** | Explore & sharing | shipped | PromQL / LogQL / TraceQL query tab, Loki live-tail, snapshot sharing, annotations |
+| **M7** | Extended surfaces | shipped | Home-screen alerts widget, Wear OS alerts tile, kiosk mode, canvas/news/flamegraph/traces renderers |
+| **M8** | Trust & UX polish | shipped | Per-account TLS pinning, custom time range, multi-select variables, `grafana://` deep links |
 
 ## Architecture
 
 ```
 android/         - Kotlin + Jetpack Compose app
-  data/
-    db/          - Room DAOs (dashboard cache, ...)
-    prefs/       - DataStore + EncryptedSharedPreferences (theme, app lock, notifications)
-    repo/        - Grafana API repos: Account, Dashboard, Alert, Notifications, PanelParser
-    model/       - Panel, PanelGroup, Series, RawFrame, ...
-  ui/
-    accounts/    - add / switch / delete Grafana accounts
-    alerts/      - alert list + detail sheet + silence controls
-    dashboards/  - list + detail + edit mode + native panel renderers
-    lock/        - PIN + biometric unlock gate
-    permissions/ - runtime permissions onboarding
-    nav/         - adaptive scaffold (rail / bottom bar)
-    splash/, theme/, auth/
+  app/
+    data/
+      db/          - Room DAOs (accounts, dashboards, notifications)
+      prefs/       - DataStore + EncryptedSharedPreferences (theme, app lock, notifications)
+      repo/        - Grafana API repos: Account, Dashboard, Alert, Datasource, OnCall,
+                     Notifications, PanelParser, RepeatExpander
+      api/         - Retrofit + OkHttp factory (per-baseUrl clients, TLS pinning)
+      model/       - Panel, PanelGroup, Series, RawFrame, ...
+      security/    - EncryptedSharedPreferences vault
+    ui/
+      accounts/    - add / switch / delete Grafana accounts, TLS pin toggle
+      alerts/      - alert list + detail sheet + silence controls
+      dashboards/  - list + detail + edit mode + native panel renderers
+      explore/     - ad-hoc PromQL / LogQL / TraceQL editor, Loki live-tail
+      datasources/ - `/api/datasources` browser
+      admin/, library/, reports/, kiosk/, history/, oncall/
+      lock/        - PIN + biometric unlock gate
+      permissions/ - runtime permissions onboarding
+      nav/         - adaptive scaffold (rail / bottom bar) + deep-link consumer
+      splash/, theme/, auth/
+    widget/        - AppWidgetProvider for the home-screen alerts widget
+    wear/          - WearAlertsPublisher (phone -> watch data channel)
+    push/          - FCM messaging service + notification channels
+  wear/            - Wear OS companion app (Tile + WearableListenerService)
 backend/         - Go relay: Alertmanager webhook -> FCM (SQLite device registry)
   cmd/relay/     - entrypoint
   internal/      - HTTP handlers, storage, FCM client
@@ -172,8 +224,11 @@ Non-obvious constraints worth knowing before hacking:
 git clone https://github.com/surendrad24/Grafusion.git
 cd Grafusion/android
 
-# Build a debug APK
+# Build a debug APK (phone)
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :app:assembleDebug
+
+# Optional: build the Wear OS companion tile
+JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :wear:assembleDebug
 
 # Install on a connected device
 adb install -r app/build/outputs/apk/debug/app-debug.apk
