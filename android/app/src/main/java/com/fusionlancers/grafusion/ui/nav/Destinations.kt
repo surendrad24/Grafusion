@@ -9,7 +9,10 @@ import androidx.compose.material.icons.filled.SupportAgent
 import androidx.compose.ui.graphics.vector.ImageVector
 
 enum class TopDest(val route: String, val label: String, val icon: ImageVector) {
-    Dashboards("dashboards", "Dashboards", Icons.Filled.Dashboard),
+    // 5 tabs on a phone means each label gets ~2 inch of width. "Dashboards" wrapped
+    // to two lines on 1080p devices, so we shorten to "Home" to match how most
+    // mobile ops apps (Grafana Cloud Mobile, PagerDuty, Datadog) label the landing tab.
+    Dashboards("dashboards", "Home", Icons.Filled.Dashboard),
     Explore("explore", "Explore", Icons.Filled.Explore),
     Alerts("alerts", "Alerts", Icons.Filled.Notifications),
     OnCall("oncall", "OnCall", Icons.Filled.SupportAgent),

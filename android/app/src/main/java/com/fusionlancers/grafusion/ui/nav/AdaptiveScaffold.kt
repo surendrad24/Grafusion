@@ -93,7 +93,14 @@ fun AdaptiveScaffold(
                             selected = currentRoute == dest.route,
                             onClick = { navController.navigateSingleTop(dest.route) },
                             icon = { Icon(dest.icon, contentDescription = dest.label) },
-                            label = { Text(dest.label) },
+                            label = {
+                                Text(
+                                    dest.label,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                )
+                            },
                         )
                     }
                 }
