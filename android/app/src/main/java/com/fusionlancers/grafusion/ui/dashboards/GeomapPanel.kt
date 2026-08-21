@@ -1,6 +1,7 @@
 package com.fusionlancers.grafusion.ui.dashboards
 
 import android.graphics.Paint
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -17,6 +18,7 @@ import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Overlay
+import org.osmdroid.views.overlay.TilesOverlay
 import android.graphics.Canvas as AndroidCanvas
 import org.osmdroid.views.Projection
 import android.graphics.Color as AndroidColor
@@ -39,6 +41,10 @@ internal fun GeomapPanel(data: PanelData) {
 
     val points = remember(data) { extractPoints(data) }
     if (points.isEmpty()) { PanelNoDataInline(); return }
+
+    // Read the theme in composition, then push it into the AndroidView via the update block
+    // so tiles re-tint when the user toggles Light/Dark without recreating the MapView.
+    val dark = isSystemInDarkTheme()
 
     Box(
         Modifier
@@ -65,8 +71,13 @@ internal fun GeomapPanel(data: PanelData) {
                 }
             },
             update = { map ->
+                // osmdroid ships a hue-inverting ColorMatrix that turns light Mapnik tiles
+                // into a passable dark basemap. Reset when Light so we don't invert twice.
+                map.overlayManager.tilesOverlay.setColorFilter(
+                    if (dark) TilesOverlay.INVERT_COLORS else null
+                )
                 map.overlays.removeAll { it is HeatDotsOverlay }
-                map.overlays.add(HeatDotsOverlay(points))
+                map.overlays.add(HeatDotsOverlay(points, darkTheme = dark))
                 boundsFor(points)?.let { map.post { map.zoomToBoundingBox(it, false, 32) } }
                 map.invalidate()
             },
@@ -138,11 +149,13 @@ private fun boundsFor(points: List<AttackPoint>): BoundingBox? {
 }
 
 /** Custom overlay draws a color/size-scaled dot per point, cheaper than osmdroid Markers for 200+ items. */
-private class HeatDotsOverlay(private val points: List<AttackPoint>) : Overlay() {
+private class HeatDotsOverlay(private val points: List<AttackPoint>, private val darkTheme: Boolean = false) : Overlay() {
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        color = AndroidColor.argb(180, 20, 20, 30)
+        // Light stroke on dark tiles, dark stroke on light tiles - dots stay legible either way.
+        color = if (darkTheme) AndroidColor.argb(200, 235, 235, 245)
+                else AndroidColor.argb(180, 20, 20, 30)
         strokeWidth = 1.2f
     }
 
