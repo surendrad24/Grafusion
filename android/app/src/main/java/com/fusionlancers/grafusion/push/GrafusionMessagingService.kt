@@ -55,25 +55,55 @@ class GrafusionMessagingService : FirebaseMessagingService() {
             ?: "Alert received"
         val fingerprint = message.data["fingerprint"] ?: message.data["alert_fingerprint"]
         val alertName = message.data["alertname"] ?: message.data["alert_name"] ?: title
-        showAlertNotification(this, title, body, fingerprint, alertName)
+        val severity = (message.data["severity"] ?: "").lowercase()
+        val bucket = if (severity in setOf("critical", "page", "error", "fatal")) "important" else "regular"
+        showAlertNotification(this, title, body, fingerprint, alertName, bucket)
+        val app = application as? GrafusionApp
+        if (app != null) {
+            scope.launch {
+                runCatching {
+                    app.container.notificationHistoryRepository.record(title, body, fingerprint, alertName, bucket)
+                }
+            }
+        }
     }
 }
 
-/** Notification channel + IDs shared by the messaging service and any local test paths. */
+/**
+ * Notification channels. We split "regular" (info/warning) from "important" (critical/page) so
+ * users can grant DND override to only the important one - matching the Grafana Mobile app's
+ * pattern. Channel importance can't be lowered by us after first creation, only by the user in
+ * system settings, so IMPORTANCE_HIGH on the important channel is a one-way default.
+ */
 object NotificationChannels {
-    const val ALERTS_ID = "grafusion_alerts"
-    private const val ALERTS_NAME = "Grafana alerts"
+    const val ALERTS_REGULAR_ID = "grafusion_alerts"
+    const val ALERTS_IMPORTANT_ID = "grafusion_alerts_important"
 
     fun ensureCreated(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val mgr = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        if (mgr.getNotificationChannel(ALERTS_ID) != null) return
-        val channel = NotificationChannel(ALERTS_ID, ALERTS_NAME, NotificationManager.IMPORTANCE_HIGH).apply {
-            description = "Firing / pending Grafana alerts routed through the Grafusion relay."
-            enableVibration(true)
+        if (mgr.getNotificationChannel(ALERTS_REGULAR_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(ALERTS_REGULAR_ID, "Grafana alerts", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = "Info / warning Grafana alerts routed through the Grafusion relay."
+                    enableVibration(true)
+                }
+            )
         }
-        mgr.createNotificationChannel(channel)
+        if (mgr.getNotificationChannel(ALERTS_IMPORTANT_ID) == null) {
+            mgr.createNotificationChannel(
+                NotificationChannel(ALERTS_IMPORTANT_ID, "Grafana alerts (important)", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Critical / page Grafana alerts. Set 'Override Do Not Disturb' in system settings if you want these to break through."
+                    enableVibration(true)
+                    setBypassDnd(false) // The USER opts in via system settings; we never bypass silently.
+                }
+            )
+        }
     }
+
+    /** Route a notification to the correct channel based on Grafana severity. */
+    fun channelFor(bucket: String): String =
+        if (bucket == "important") ALERTS_IMPORTANT_ID else ALERTS_REGULAR_ID
 }
 
 internal fun showAlertNotification(
@@ -82,6 +112,7 @@ internal fun showAlertNotification(
     body: String,
     fingerprint: String? = null,
     alertName: String? = null,
+    bucket: String = "regular",
 ) {
     NotificationChannels.ensureCreated(context)
     // POST_NOTIFICATIONS is runtime-required on Android 13+; the PermissionsScreen prompts for it.
@@ -104,12 +135,12 @@ internal fun showAlertNotification(
         openIntent,
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
-    val notification = NotificationCompat.Builder(context, NotificationChannels.ALERTS_ID)
+    val notification = NotificationCompat.Builder(context, NotificationChannels.channelFor(bucket))
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle(title)
         .setContentText(body)
         .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-        .setPriority(NotificationCompat.PRIORITY_HIGH)
+        .setPriority(if (bucket == "important") NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_DEFAULT)
         .setAutoCancel(true)
         .setContentIntent(openApp)
         .build()

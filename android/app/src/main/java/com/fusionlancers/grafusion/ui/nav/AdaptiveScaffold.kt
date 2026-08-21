@@ -27,6 +27,7 @@ import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import com.fusionlancers.grafusion.ui.history.NotificationHistoryScreen
 import com.fusionlancers.grafusion.ui.oncall.OnCallScreen
 import com.fusionlancers.grafusion.ui.permissions.PermissionsScreen
 import java.net.URLDecoder
@@ -131,10 +132,18 @@ private fun AppNavHost(
             AccountsScreen(
                 container = container,
                 onOpenPermissions = { navController.navigate("permissions") },
+                onOpenHistory = { navController.navigate("notification_history") },
             )
         }
         composable("permissions") {
             PermissionsScreen(onBack = { navController.popBackStack() })
+        }
+        composable("notification_history") {
+            NotificationHistoryScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+                onOpenAlerts = { navController.navigateSingleTop(TopDest.Alerts.route) },
+            )
         }
     }
 }

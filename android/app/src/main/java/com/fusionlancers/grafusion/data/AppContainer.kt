@@ -11,6 +11,7 @@ import com.fusionlancers.grafusion.data.repo.AccountRepository
 import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.data.repo.ExploreRepository
+import com.fusionlancers.grafusion.data.repo.NotificationHistoryRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
@@ -66,6 +67,10 @@ class AppContainer(context: Context) {
     val exploreRepository = ExploreRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
+    )
+
+    val notificationHistoryRepository = NotificationHistoryRepository(
+        dao = db.notificationHistoryDao(),
     )
 
     /** Set by MainActivity when opened via a notification tap; consumed by AlertsScreen. */

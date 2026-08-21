@@ -82,7 +82,11 @@ import com.fusionlancers.grafusion.ui.theme.EnergyOrange
 import kotlinx.coroutines.launch
 
 @Composable
-fun AccountsScreen(container: AppContainer, onOpenPermissions: () -> Unit = {}) {
+fun AccountsScreen(
+    container: AppContainer,
+    onOpenPermissions: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
+) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
     val notif by container.notificationPreferences.flow.collectAsState(initial = container.notificationPreferences.current())
@@ -180,6 +184,7 @@ fun AccountsScreen(container: AppContainer, onOpenPermissions: () -> Unit = {}) 
                 config = notif,
                 onSaveRelay = { url -> container.notificationPreferences.setRelayUrl(url) },
                 onOpenPermissions = onOpenPermissions,
+                onOpenHistory = onOpenHistory,
                 onRegister = {
                     scope.launch {
                         val r = container.notificationsRepository.registerCurrentDevice()
@@ -252,6 +257,7 @@ private fun NotificationsCard(
     config: NotificationConfig,
     onSaveRelay: (String) -> Unit,
     onOpenPermissions: () -> Unit,
+    onOpenHistory: () -> Unit,
     onRegister: () -> Unit,
     onSendTest: () -> Unit,
 ) {
@@ -345,6 +351,14 @@ private fun NotificationsCard(
                 shape = RoundedCornerShape(12.dp),
             ) {
                 Text("Notification permissions", maxLines = 1)
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = onOpenHistory,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("Notification history (30 days)", maxLines = 1)
             }
         }
     }
