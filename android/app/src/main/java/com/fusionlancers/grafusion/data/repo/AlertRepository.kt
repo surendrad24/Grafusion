@@ -1,6 +1,7 @@
 package com.fusionlancers.grafusion.data.repo
 
 import com.fusionlancers.grafusion.data.api.AmAlert
+import com.fusionlancers.grafusion.data.api.AmSilence
 import com.fusionlancers.grafusion.data.api.GrafanaAnnotation
 import com.fusionlancers.grafusion.data.api.GrafanaApiFactory
 import com.fusionlancers.grafusion.data.model.Alert
@@ -52,6 +53,55 @@ class AlertRepository(
                 else -> "HTTP ${resp.code()}"
             }
             error(hint)
+        }
+    }
+
+    /**
+     * "Acknowledge" isn't a first-class Alertmanager concept - conventionally it's a short silence
+     * with an "Acknowledged" comment so downstream folks see who took ownership. We use 4 hours by
+     * default which is Grafana's own web-UI ack window.
+     */
+    suspend fun acknowledge(alert: Alert, by: String): Result<Unit> =
+        silence(alert, durationMinutes = 240, comment = "Acknowledged by $by (Grafusion mobile)", createdBy = by)
+
+    /** List active + pending silences so the alert sheet can show them and let the user expire one. */
+    suspend fun listSilences(): Result<List<AmSilence>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        api.listSilences(auth).filter { it.status.state != "expired" }
+    }
+
+    /**
+     * Expire (unmute) an in-flight silence. Grafana returns 200 on success and 404 when the ID has
+     * already been expired by another user; we treat both as success so the UI stays consistent.
+     */
+    suspend fun expireSilence(silenceId: String): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.expireSilence(auth, silenceId)
+        if (!resp.isSuccessful && resp.code() != 404) {
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana user lacks alert-silence permission"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+    }
+
+    /**
+     * Match a set of silences against an alert's labels. A silence is "for" the alert when *all*
+     * of its matchers pass against the alert's label set.
+     */
+    fun silencesFor(alert: Alert, silences: List<AmSilence>): List<AmSilence> {
+        return silences.filter { s ->
+            s.matchers.isNotEmpty() && s.matchers.all { m ->
+                val v = alert.labels[m.name] ?: return@all false
+                val matches = if (m.isRegex) runCatching { Regex(m.value).matches(v) }.getOrDefault(false)
+                              else v == m.value
+                if (m.isEqual) matches else !matches
+            }
         }
     }
 

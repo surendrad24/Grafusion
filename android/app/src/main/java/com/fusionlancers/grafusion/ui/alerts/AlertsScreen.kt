@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
+import com.fusionlancers.grafusion.data.api.AmSilence
 import com.fusionlancers.grafusion.data.model.Alert
 import com.fusionlancers.grafusion.data.model.AlertState
 import com.fusionlancers.grafusion.ui.theme.EnergyOrange
@@ -83,6 +84,7 @@ private sealed class AlertFilter {
 fun AlertsScreen(container: AppContainer) {
     val scope = rememberCoroutineScope()
     var alerts by remember { mutableStateOf<List<Alert>>(emptyList()) }
+    var silences by remember { mutableStateOf<List<AmSilence>>(emptyList()) }
     var refreshing by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf<AlertFilter>(AlertFilter.All) }
@@ -97,6 +99,10 @@ fun AlertsScreen(container: AppContainer) {
             container.alertRepository.fetchAlerts()
                 .onSuccess { alerts = it }
                 .onFailure { error = it.message ?: "Failed to load alerts" }
+            // Silences are non-fatal: if the user can't see them we just hide the section.
+            container.alertRepository.listSilences()
+                .onSuccess { silences = it }
+                .onFailure { silences = emptyList() }
             refreshing = false
         }
     }
@@ -188,12 +194,28 @@ fun AlertsScreen(container: AppContainer) {
     SnackbarHost(hostState = snackbar)
 
     selected?.let { alert ->
+        val activeSilences = remember(alert, silences) {
+            container.alertRepository.silencesFor(alert, silences)
+        }
         ModalBottomSheet(
             onDismissRequest = { selected = null },
             sheetState = sheetState,
         ) {
             AlertSheet(
                 alert = alert,
+                activeSilences = activeSilences,
+                onAcknowledge = {
+                    scope.launch {
+                        val who = container.accountRepository.activeEntity()?.login ?: "grafusion"
+                        container.alertRepository.acknowledge(alert, who)
+                            .onSuccess {
+                                snackbar.showSnackbar("Acknowledged for 4h")
+                                selected = null
+                                reload()
+                            }
+                            .onFailure { snackbar.showSnackbar("Ack failed: ${it.message}") }
+                    }
+                },
                 onSilence = { minutes ->
                     scope.launch {
                         val who = container.accountRepository.activeEntity()?.login ?: "grafusion"
@@ -207,6 +229,16 @@ fun AlertsScreen(container: AppContainer) {
                             .onFailure { snackbar.showSnackbar("Silence failed: ${it.message}") }
                     }
                 },
+                onExpireSilence = { silenceId ->
+                    scope.launch {
+                        container.alertRepository.expireSilence(silenceId)
+                            .onSuccess {
+                                snackbar.showSnackbar("Silence lifted")
+                                reload()
+                            }
+                            .onFailure { snackbar.showSnackbar("Failed to lift silence: ${it.message}") }
+                    }
+                },
                 onDismiss = { selected = null },
             )
         }
@@ -214,7 +246,14 @@ fun AlertsScreen(container: AppContainer) {
 }
 
 @Composable
-private fun AlertSheet(alert: Alert, onSilence: (Long) -> Unit, onDismiss: () -> Unit) {
+private fun AlertSheet(
+    alert: Alert,
+    activeSilences: List<AmSilence>,
+    onAcknowledge: () -> Unit,
+    onSilence: (Long) -> Unit,
+    onExpireSilence: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -241,10 +280,44 @@ private fun AlertSheet(alert: Alert, onSilence: (Long) -> Unit, onDismiss: () ->
                 Text("$k = $v", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f))
             }
         }
+        if (activeSilences.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("Active silences", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            activeSilences.forEach { s ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            s.comment.orEmpty().ifBlank { "Silenced" },
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "until ${s.endsAt?.take(19) ?: "?"} - by ${s.createdBy.orEmpty().ifBlank { "?" }}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        )
+                    }
+                    OutlinedButton(onClick = { onExpireSilence(s.id) }) { Text("Unmute") }
+                }
+            }
+        }
         Spacer(Modifier.height(20.dp))
-        Text("Silence this alert", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Text("Actions", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = onAcknowledge,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3498DB)),
+            ) {
+                Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Ack 4h")
+            }
             SilenceButton("30m", onSilence, 30)
             SilenceButton("2h", onSilence, 120)
             SilenceButton("24h", onSilence, 1440)

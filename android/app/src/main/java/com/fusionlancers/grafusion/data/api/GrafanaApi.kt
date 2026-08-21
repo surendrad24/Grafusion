@@ -90,6 +90,17 @@ interface GrafanaApi {
         @Body body: kotlinx.serialization.json.JsonObject,
     ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
 
+    @GET("api/alertmanager/grafana/api/v2/silences")
+    suspend fun listSilences(
+        @Header("Authorization") auth: String,
+    ): List<AmSilence>
+
+    @DELETE("api/alertmanager/grafana/api/v2/silence/{id}")
+    suspend fun expireSilence(
+        @Header("Authorization") auth: String,
+        @Path("id") id: String,
+    ): retrofit2.Response<Unit>
+
     // ---- Grafana OnCall plugin (optional; 404 when the plugin isn't installed) ----
 
     @GET("api/plugins/grafana-oncall-app/resources/schedules/")
@@ -195,6 +206,29 @@ data class AmStatus(
     val state: String = "active",
     val silencedBy: List<String> = emptyList(),
     val inhibitedBy: List<String> = emptyList(),
+)
+
+@Serializable
+data class AmSilence(
+    val id: String,
+    val status: AmSilenceStatus = AmSilenceStatus(),
+    val startsAt: String? = null,
+    val endsAt: String? = null,
+    val updatedAt: String? = null,
+    val createdBy: String? = null,
+    val comment: String? = null,
+    val matchers: List<AmMatcher> = emptyList(),
+)
+
+@Serializable
+data class AmSilenceStatus(val state: String = "active")
+
+@Serializable
+data class AmMatcher(
+    val name: String = "",
+    val value: String = "",
+    val isRegex: Boolean = false,
+    val isEqual: Boolean = true,
 )
 
 @Serializable
