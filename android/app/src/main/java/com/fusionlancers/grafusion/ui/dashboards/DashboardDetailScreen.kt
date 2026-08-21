@@ -1464,6 +1464,10 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "geomap", "worldmap-panel" -> GeomapPanel(data)
         "alertlist" -> AlertListPanel(panel)
         "dashlist" -> DashListPanel(panel)
+        "histogram" -> HistogramPanel(panel, data)
+        "candlestick" -> CandlestickPanel(data)
+        "trend" -> TrendPanel(data)
+        "xychart", "xy-chart" -> XyChartPanel(data)
         else -> UnsupportedPanel(panel.type, null)
     }
 }
