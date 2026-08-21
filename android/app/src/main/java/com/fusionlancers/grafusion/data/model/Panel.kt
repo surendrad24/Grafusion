@@ -35,6 +35,8 @@ data class Panel(
     val repeatDirection: String? = null,
     /** Set on cloned panels produced by expandRepeats() - single-value override for [repeat]. */
     val repeatValue: String? = null,
+    /** Raw `transformations` array from panel JSON, applied to frames before rendering (table panel). */
+    val transformations: List<JsonObject> = emptyList(),
 )
 
 /** fieldConfig.defaults.mappings entry. Grafana v9+ shape: { type, options }.

@@ -97,7 +97,12 @@ class DashboardRepository(
             val detail = api.dashboardByUid(auth, uid)
             val parsed = PanelParser.parsePanels(detail.dashboard)
             val groups = PanelParser.parseGroups(detail.dashboard)
-            val variables = VariableParser.parse(detail.dashboard)
+            val parsedVars = VariableParser.parse(detail.dashboard)
+            // Resolve type=query variables against Prometheus/Loki label-values before returning.
+            // Failure is non-fatal - we fall back to the snapshot in the dashboard JSON.
+            val variables = runCatching {
+                VariableResolver.resolve(parsedVars, apiFactory.client, entity.grafanaUrl, auth)
+            }.getOrDefault(parsedVars)
             // Persist the raw dashboard JSON so we can render offline next time.
             runCatching {
                 val json = kotlinx.serialization.json.Json.encodeToString(

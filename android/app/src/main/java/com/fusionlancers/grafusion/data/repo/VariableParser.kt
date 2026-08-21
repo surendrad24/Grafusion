@@ -22,6 +22,19 @@ internal object VariableParser {
             val includeAll = obj["includeAll"]?.jsonPrimitive?.contentOrNull()?.toBooleanStrictOrNull() ?: false
             val allValue = obj["allValue"]?.jsonPrimitive?.contentOrNull()
             val hide = obj["hide"]?.jsonPrimitive?.contentOrNull()?.toIntOrNull() ?: 0
+            val regex = obj["regex"]?.jsonPrimitive?.contentOrNull()
+            val sort = obj["sort"]?.jsonPrimitive?.contentOrNull()?.toIntOrNull() ?: 0
+
+            val ds = obj["datasource"] as? JsonObject
+            val dsType = ds?.get("type")?.jsonPrimitive?.contentOrNull()
+            val dsUid = ds?.get("uid")?.jsonPrimitive?.contentOrNull()
+
+            // `query` may be either a bare string ("label_values(...)") or an object {query, refId, ...}.
+            val queryExpr = when (val q = obj["query"]) {
+                is JsonPrimitive -> q.contentOrNull()
+                is JsonObject -> q["query"]?.jsonPrimitive?.contentOrNull()
+                else -> null
+            }
 
             val optionsArr = obj["options"] as? JsonArray
             val options = optionsArr?.mapNotNull { opt ->
@@ -43,6 +56,11 @@ internal object VariableParser {
                 includeAll = includeAll,
                 allValue = allValue,
                 hide = hide,
+                datasourceType = dsType,
+                datasourceUid = dsUid,
+                queryExpr = queryExpr,
+                regex = regex,
+                sort = sort,
             )
         }
     }

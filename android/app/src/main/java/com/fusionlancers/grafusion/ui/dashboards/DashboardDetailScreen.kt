@@ -1636,12 +1636,12 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "stat", "singlestat" -> StatOrGaugePanel(panel, data, cardWidth)
         "gauge" -> GaugePanel(panel, data, cardWidth)
         "bargauge" -> BarGaugePanel(panel, data)
-        "table", "table-old" -> TablePanel(data)
+        "table", "table-old" -> TablePanel(panel, data)
         "barchart" -> BarChartPanel(panel, data)
         "piechart", "grafana-piechart-panel" -> PieChartPanel(panel, data)
         "heatmap", "heatmap-old" -> HeatmapPanel(data)
         "state-timeline", "status-history" -> StateTimelinePanel(data)
-        "logs" -> LogsPanel(data)
+        "logs" -> LogsPanel(panel, data)
         "text" -> TextPanel(panel)
         "geomap", "worldmap-panel", "grafana-worldmap-panel" -> GeomapPanel(data)
         "alertlist" -> AlertListPanel(panel)
@@ -1656,7 +1656,31 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "flamegraph", "grafana-pyroscope-app-flamegraph" -> FlamegraphPanel(data)
         "traces" -> TracesPanel(data)
         "canvas" -> CanvasPanel(panel)
+        // Datagrid is Grafana's editable spreadsheet panel - render as table (read-only view).
+        "datagrid" -> TablePanel(panel, data)
+        // Debug panel shows raw refresh events; give users a friendly placeholder that mirrors intent.
+        "debug" -> DebugPanel(panel, data)
+        // Welcome panel ships on empty Grafana installs; treat like the text panel.
+        "welcome" -> TextPanel(panel)
         else -> UnsupportedPanel(panel.type, null)
+    }
+}
+
+@Composable
+private fun DebugPanel(panel: Panel, data: PanelData) {
+    // Grafana's debug panel prints panel + data lifecycle. On mobile we surface counts + errors,
+    // which is what the panel actually offers users on the web when they open it.
+    Column(Modifier.fillMaxWidth().padding(4.dp)) {
+        Text("Debug", style = MaterialTheme.typography.labelMedium, color = EnergyOrange)
+        Spacer(Modifier.height(4.dp))
+        Text("Panel type: ${panel.type}", style = MaterialTheme.typography.bodySmall)
+        Text("Targets: ${panel.targets.size}", style = MaterialTheme.typography.bodySmall)
+        Text("Series: ${data.series.size}", style = MaterialTheme.typography.bodySmall)
+        Text("Frames: ${data.frames.size}", style = MaterialTheme.typography.bodySmall)
+        data.error?.let {
+            Spacer(Modifier.height(4.dp))
+            Text("Error: $it", style = MaterialTheme.typography.bodySmall, color = Color(0xFFEF4444))
+        }
     }
 }
 
@@ -1674,8 +1698,13 @@ private fun TimeseriesPanel(data: PanelData) {
     val visibleSeries = validSeries.filter { it.first.name !in hidden }
     val producer = remember { CartesianChartModelProducer() }
     val lineColors = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE))
-    // Compose lines matching only the visible subset, in the same order, so colors stay stable
-    // relative to the visible slice (Vico maps line providers positionally).
+    // Pin each series to a color derived from its name so toggling one doesn't reshuffle the rest.
+    // The chart's per-position line providers then get colors matched to the visible series order.
+    fun colorFor(name: String): Color {
+        val h = name.hashCode() and 0x7fffffff
+        return lineColors[h % lineColors.size]
+    }
+    val visibleColors = visibleSeries.map { colorFor(it.first.name) }
     LaunchedEffect(visibleSeries) {
         if (visibleSeries.isEmpty()) return@LaunchedEffect
         producer.runTransaction {
@@ -1694,7 +1723,7 @@ private fun TimeseriesPanel(data: PanelData) {
         Box(Modifier.fillMaxWidth().height(200.dp)) {
             val layer = rememberLineCartesianLayer(
                 lineProvider = LineCartesianLayer.LineProvider.series(
-                    lineColors.map { color ->
+                    visibleColors.map { color ->
                         LineCartesianLayer.rememberLine(
                             fill = LineCartesianLayer.LineFill.single(fill(color)),
                         )
@@ -1726,7 +1755,7 @@ private fun TimeseriesPanel(data: PanelData) {
             validSeries.take(12).forEachIndexed { idx, (s, pairs) ->
                 val isHidden = s.name in hidden
                 val chipColor = if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                                else lineColors[idx % lineColors.size]
+                                else colorFor(s.name)
                 val last = pairs.last().second
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2728,8 +2757,11 @@ private fun grafanaColor(token: String): Color {
 }
 
 @Composable
-private fun TablePanel(data: PanelData) {
-    val frame = data.frames.firstOrNull() ?: return
+private fun TablePanel(panel: Panel, data: PanelData) {
+    val transformed = remember(data, panel.transformations) {
+        com.fusionlancers.grafusion.data.repo.TableTransformer.apply(data.frames, panel.transformations)
+    }
+    val frame = transformed.firstOrNull() ?: return
     val rowCount = frame.rowCount.coerceAtMost(50)
     if (rowCount == 0) { PanelNoData(); return }
     val scrollState = rememberScrollState()
@@ -2774,11 +2806,21 @@ private fun TablePanel(data: PanelData) {
 }
 
 @Composable
-private fun LogsPanel(data: PanelData) {
-    val frame = data.frames.firstOrNull() ?: return
+private fun LogsPanel(panel: Panel, data: PanelData) {
+    val raw = data.frames.firstOrNull() ?: return
+    val frame = remember(panel.id, raw) {
+        com.fusionlancers.grafusion.data.repo.LogQLPipeline.reshape(panel, raw)
+    }
     val timeIdx = frame.fieldTypes.indexOfFirst { it == "time" }
+    // Prefer well-known line columns; then fall back to first string column that is NOT a
+    // metadata column (labels, id, tsNs, ...) - picking those shows raw JSON instead of the log.
+    val metaColNames = setOf("labels", "labeljson", "id", "tsns", "tsfraction", "level")
     val lineIdx = frame.fieldNames.indexOfFirst { it.equals("Line", true) || it.equals("Body", true) || it.equals("Value", true) }
-        .takeIf { it >= 0 } ?: frame.fieldTypes.indexOfFirst { it == "string" }
+        .takeIf { it >= 0 }
+        ?: frame.fieldNames.indices.firstOrNull { i ->
+            frame.fieldTypes[i] == "string" && frame.fieldNames[i].lowercase() !in metaColNames
+        }
+        ?: frame.fieldTypes.indexOfFirst { it == "string" }
     if (lineIdx < 0) { PanelNoData(); return }
     val levelIdx = frame.fieldNames.indexOfFirst {
         it.equals("level", true) || it.equals("severity", true) || it.equals("SeverityText", true)

@@ -87,6 +87,7 @@ internal object PanelParser {
         val timeShift = obj["timeShift"]?.jsonPrimitive?.contentOrNullSafe()
         val repeat = obj["repeat"]?.jsonPrimitive?.contentOrNullSafe()
         val repeatDirection = obj["repeatDirection"]?.jsonPrimitive?.contentOrNullSafe()
+        val transformations = obj["transformations"]?.jsonArray?.mapNotNull { it as? JsonObject } ?: emptyList()
         return Panel(
             id = id,
             title = title,
@@ -110,6 +111,7 @@ internal object PanelParser {
             timeShift = timeShift?.takeIf { it.isNotBlank() },
             repeat = repeat?.takeIf { it.isNotBlank() },
             repeatDirection = repeatDirection?.takeIf { it.isNotBlank() },
+            transformations = transformations,
         )
     }
 
