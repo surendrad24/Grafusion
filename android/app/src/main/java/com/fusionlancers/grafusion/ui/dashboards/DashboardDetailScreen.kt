@@ -157,7 +157,10 @@ import java.util.Date
 import java.util.Locale
 
 /** Container access for deeply-nested panel composables that need to call repositories. */
-private val LocalAppContainer = staticCompositionLocalOf<AppContainer?> { null }
+internal val LocalAppContainer = staticCompositionLocalOf<AppContainer?> { null }
+
+/** Current dashboard UID so annotations/dashlist can scope to "this dashboard" without threading. */
+internal val LocalDashboardUid = staticCompositionLocalOf<String?> { null }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -264,7 +267,10 @@ fun DashboardDetailScreen(
         }
     }
 
-    CompositionLocalProvider(LocalAppContainer provides container) {
+    CompositionLocalProvider(
+        LocalAppContainer provides container,
+        LocalDashboardUid provides uid,
+    ) {
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
@@ -1366,7 +1372,7 @@ private fun PanelCard(
                     onOpenBrowser = onOpenBrowser,
                 )
                 Spacer(Modifier.height(if (cardW < 140.dp) 6.dp else 12.dp))
-                val selfLoads = panel.type == "alertlist" || panel.type == "dashlist"
+                val selfLoads = panel.type == "alertlist" || panel.type == "dashlist" || panel.type == "annolist"
                 when {
                     selfLoads -> PanelBody(panel = panel, data = data ?: PanelData(emptyList()), cardWidth = cardW)
                     data == null -> PanelLoading()
@@ -1468,6 +1474,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "candlestick" -> CandlestickPanel(data)
         "trend" -> TrendPanel(data)
         "xychart", "xy-chart" -> XyChartPanel(data)
+        "annolist" -> AnnotationsListPanel(panel)
         else -> UnsupportedPanel(panel.type, null)
     }
 }

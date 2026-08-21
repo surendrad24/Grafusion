@@ -1,6 +1,7 @@
 package com.fusionlancers.grafusion.data.repo
 
 import com.fusionlancers.grafusion.data.api.AmAlert
+import com.fusionlancers.grafusion.data.api.GrafanaAnnotation
 import com.fusionlancers.grafusion.data.api.GrafanaApiFactory
 import com.fusionlancers.grafusion.data.model.Alert
 import com.fusionlancers.grafusion.data.model.AlertState
@@ -84,5 +85,25 @@ class AlertRepository(
             labels = labels,
             generatorURL = generatorURL,
         )
+    }
+
+    /**
+     * Fetch dashboard annotations. When [dashboardUid] is provided the server only returns
+     * annotations tied to that dashboard; otherwise it returns everything the user can see,
+     * capped by [limit]. Used by the annolist panel.
+     */
+    suspend fun annotations(
+        dashboardUid: String? = null,
+        limit: Int = 100,
+        tags: List<String> = emptyList(),
+    ): Result<List<GrafanaAnnotation>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        // The Grafana endpoint accepts repeated tags[]= params; we can't easily wire that through
+        // Retrofit's @Query for a variable list, so we filter client-side after fetching.
+        val all = api.listAnnotations(auth, limit = limit, dashboardUid = dashboardUid)
+        if (tags.isEmpty()) all
+        else all.filter { ann -> ann.tags.any { it in tags } }
     }
 }

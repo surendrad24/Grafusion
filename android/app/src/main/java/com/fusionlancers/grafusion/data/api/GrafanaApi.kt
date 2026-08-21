@@ -66,6 +66,16 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
     ): List<Datasource>
 
+    @GET("api/annotations")
+    suspend fun listAnnotations(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int = 100,
+        @Query("dashboardUID") dashboardUid: String? = null,
+        @Query("type") type: String? = null,
+        @Query("from") from: Long? = null,
+        @Query("to") to: Long? = null,
+    ): List<GrafanaAnnotation>
+
     @GET("api/alertmanager/grafana/api/v2/alerts")
     suspend fun grafanaAlerts(
         @Header("Authorization") auth: String,
@@ -228,6 +238,25 @@ data class DashboardSummary(
     @SerialName("folderUid") val folderUid: String? = null,
     val tags: List<String> = emptyList(),
     val isStarred: Boolean = false,
+)
+
+@Serializable
+data class GrafanaAnnotation(
+    val id: Long = 0,
+    val alertId: Long = 0,
+    val dashboardId: Long = 0,
+    val dashboardUID: String? = null,
+    val panelId: Long = 0,
+    val time: Long = 0,
+    val timeEnd: Long = 0,
+    val text: String = "",
+    val tags: List<String> = emptyList(),
+    val login: String? = null,
+    val email: String? = null,
+    val avatarUrl: String? = null,
+    val newState: String? = null,
+    val prevState: String? = null,
+    val alertName: String? = null,
 )
 
 @Serializable
