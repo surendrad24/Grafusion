@@ -112,6 +112,11 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -2574,6 +2579,9 @@ private fun AlertListRow(alert: Alert) {
             style = MaterialTheme.typography.labelSmall,
             color = dot,
             fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .background(dot.copy(alpha = 0.12f), RoundedCornerShape(50))
+                .padding(horizontal = 8.dp, vertical = 2.dp),
         )
     }
 }
@@ -2665,34 +2673,104 @@ private fun TextPanel(panel: Panel) {
     val content = options?.get("content")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()
     val mode = options?.get("mode")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.orEmpty()
     if (content.isBlank()) { PanelNoData(); return }
-    val rendered = remember(content, mode) { renderTextPanel(content, mode) }
-    Text(
-        rendered,
-        style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-    )
+    if (mode.equals("html", true)) {
+        val plain = remember(content) {
+            content
+                .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+                .replace(Regex("</p\\s*>", RegexOption.IGNORE_CASE), "\n\n")
+                .replace(Regex("<[^>]+>"), "")
+                .replace("&nbsp;", " ").replace("&amp;", "&")
+                .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
+                .trim()
+        }
+        Text(
+            plain,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        )
+        return
+    }
+    val baseColor = MaterialTheme.colorScheme.onSurface
+    val subtleColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+    val accent = EnergyOrange
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        content.trim().split('\n').forEach { rawLine ->
+            val line = rawLine.trimEnd()
+            when {
+                line.isBlank() -> Spacer(Modifier.height(4.dp))
+                line.startsWith("# ") -> Text(
+                    renderInline(line.removePrefix("# "), accent),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = baseColor,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                )
+                line.startsWith("## ") -> Text(
+                    renderInline(line.removePrefix("## "), accent),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = baseColor,
+                    modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
+                )
+                line.startsWith("### ") -> Text(
+                    renderInline(line.removePrefix("### "), accent),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = baseColor,
+                )
+                line.matches(Regex("^[-*]\\s+.*")) -> Row(
+                    verticalAlignment = Alignment.Top,
+                    modifier = Modifier.padding(start = 4.dp),
+                ) {
+                    Text("•", style = MaterialTheme.typography.bodyMedium, color = subtleColor, modifier = Modifier.width(14.dp))
+                    Text(
+                        renderInline(line.replaceFirst(Regex("^[-*]\\s+"), ""), accent),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = baseColor,
+                    )
+                }
+                else -> Text(
+                    renderInline(line, accent),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = baseColor,
+                )
+            }
+        }
+    }
 }
 
-/** Best-effort strip of markdown/html to plain text - mobile card is too narrow for real rendering. */
-private fun renderTextPanel(content: String, mode: String): String {
-    var s = content
-    if (mode.equals("html", true)) {
-        s = s.replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
-            .replace(Regex("</p\\s*>", RegexOption.IGNORE_CASE), "\n\n")
-            .replace(Regex("<[^>]+>"), "")
-            .replace("&nbsp;", " ")
-            .replace("&amp;", "&")
-            .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")
-    } else {
-        // Markdown: keep bullets and headers as plain text.
-        s = s.replace(Regex("^#{1,6}\\s+", RegexOption.MULTILINE), "")
-            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
-            .replace(Regex("\\*(.+?)\\*"), "$1")
-            .replace(Regex("`([^`]+)`"), "$1")
-            .replace(Regex("\\[(.+?)]\\(.+?\\)"), "$1")
+private fun renderInline(src: String, accent: Color): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    while (i < src.length) {
+        // bold **text**
+        val bold = Regex("\\*\\*([^*]+)\\*\\*").find(src, i)
+        val italic = Regex("(?<![*])\\*([^*]+)\\*(?!\\*)").find(src, i)
+        val code = Regex("`([^`]+)`").find(src, i)
+        val link = Regex("\\[([^]]+)]\\(([^)]+)\\)").find(src, i)
+        val next = listOfNotNull(bold, italic, code, link).minByOrNull { it.range.first }
+        if (next == null) {
+            append(src.substring(i))
+            break
+        }
+        if (next.range.first > i) append(src.substring(i, next.range.first))
+        when (next) {
+            bold -> withStyleSafe(SpanStyle(fontWeight = FontWeight.Bold)) { append(next.groupValues[1]) }
+            italic -> withStyleSafe(SpanStyle(fontStyle = FontStyle.Italic)) { append(next.groupValues[1]) }
+            code -> withStyleSafe(
+                SpanStyle(fontFamily = FontFamily.Monospace, color = accent)
+            ) { append(next.groupValues[1]) }
+            link -> withStyleSafe(
+                SpanStyle(color = accent, textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline)
+            ) { append(next.groupValues[1]) }
+        }
+        i = next.range.last + 1
     }
-    return s.trim()
+}
+
+private inline fun androidx.compose.ui.text.AnnotatedString.Builder.withStyleSafe(style: SpanStyle, block: androidx.compose.ui.text.AnnotatedString.Builder.() -> Unit) {
+    val idx = pushStyle(style)
+    try { block() } finally { pop(idx) }
 }
 
 @Composable
