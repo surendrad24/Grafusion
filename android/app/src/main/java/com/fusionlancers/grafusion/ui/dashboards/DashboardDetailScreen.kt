@@ -1555,15 +1555,27 @@ private fun TimeseriesPanel(data: PanelData) {
 
 @Composable
 private fun BarChartPanel(data: PanelData) {
-    // Two shapes:
-    // A) Prometheus format=table+instant: one frame per label combo, label in fieldLabels, value is last number.
-    // B) Single frame with a label column (string) + value column (number).
-    val labeledPairs = remember(data) { extractBarPairs(data) }
+    // Three shapes we handle:
+    // A) Grouped categorical: one frame with a string column (categories) + N number columns (series).
+    //    Renders as side-by-side grouped columns per category.
+    // B) Prometheus format=table+instant: one frame per label combo -> single-series column chart.
+    // C) Single frame with a label column (string) + one value column -> single-series column chart.
+    val grouped = remember(data) { extractGroupedBars(data) }
+    if (grouped != null && grouped.seriesValues.size > 1) {
+        GroupedBarChart(grouped)
+        return
+    }
+    val labeledPairs = grouped?.toSinglePairs() ?: extractBarPairs(data)
     if (labeledPairs.isEmpty()) { PanelNoData(); return }
-    val values = labeledPairs.map { it.second }
-    val labels = labeledPairs.map { it.first }
+    SingleSeriesBarChart(labeledPairs)
+}
+
+@Composable
+private fun SingleSeriesBarChart(pairs: List<Pair<String, Double>>) {
+    val values = pairs.map { it.second }
+    val labels = pairs.map { it.first }
     val producer = remember { CartesianChartModelProducer() }
-    LaunchedEffect(data) {
+    LaunchedEffect(pairs) {
         producer.runTransaction {
             columnSeries { series(values) }
         }
@@ -1583,6 +1595,95 @@ private fun BarChartPanel(data: PanelData) {
             scrollState = rememberVicoScrollState(scrollEnabled = true),
         )
     }
+}
+
+@Composable
+private fun GroupedBarChart(g: GroupedBars) {
+    val producer = remember { CartesianChartModelProducer() }
+    LaunchedEffect(g) {
+        producer.runTransaction {
+            columnSeries {
+                g.seriesValues.forEach { values -> series(values) }
+            }
+        }
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Box(Modifier.fillMaxWidth().height(220.dp)) {
+            CartesianChartHost(
+                chart = rememberCartesianChart(
+                    rememberColumnCartesianLayer(
+                        mergeMode = { ColumnCartesianLayer.MergeMode.Grouped() },
+                    ),
+                    startAxis = VerticalAxis.rememberStart(),
+                    bottomAxis = HorizontalAxis.rememberBottom(
+                        valueFormatter = { _, value, _ ->
+                            g.categories.getOrNull(value.toInt()) ?: value.toInt().toString()
+                        }
+                    ),
+                ),
+                modelProducer = producer,
+                scrollState = rememberVicoScrollState(scrollEnabled = true),
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            g.seriesNames.forEachIndexed { idx, name ->
+                LegendSwatch(name = name, color = barSeriesColor(idx))
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegendSwatch(name: String, color: Color) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(10.dp).background(color, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(4.dp))
+        Text(
+            name,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun barSeriesColor(idx: Int): Color = listOf(
+    EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA),
+    Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE),
+)[idx % 7]
+
+private data class GroupedBars(
+    val categories: List<String>,
+    val seriesNames: List<String>,
+    val seriesValues: List<List<Double>>,
+) {
+    fun toSinglePairs(): List<Pair<String, Double>>? {
+        if (seriesValues.size != 1) return null
+        val vs = seriesValues[0]
+        return categories.zip(vs)
+    }
+}
+
+/**
+ * Detect a grouped-bar frame: one string column + >= 1 number columns. Returns null
+ * if the shape doesn't fit so callers fall back to the flat single-series path.
+ */
+private fun extractGroupedBars(data: PanelData): GroupedBars? {
+    val frame = data.frames.firstOrNull() ?: return null
+    val strIdx = frame.fieldTypes.indexOfFirst { it == "string" }
+    if (strIdx < 0) return null
+    val numIdxs = frame.fieldTypes.mapIndexedNotNull { i, t -> if (t == "number") i else null }
+    if (numIdxs.isEmpty()) return null
+    val rowCount = frame.rowCount.coerceAtMost(30)
+    if (rowCount == 0) return null
+    val categories = (0 until rowCount).map { r -> frame.columns[strIdx].getOrNull(r)?.toString().orEmpty() }
+    val seriesNames = numIdxs.map { frame.fieldNames.getOrNull(it) ?: "series" }
+    val seriesValues = numIdxs.map { idx ->
+        (0 until rowCount).map { r -> (frame.columns[idx].getOrNull(r) as? Number)?.toDouble() ?: 0.0 }
+    }
+    return GroupedBars(categories, seriesNames, seriesValues)
 }
 
 private fun reduceStat(values: List<Double>, calc: String): Double? {
