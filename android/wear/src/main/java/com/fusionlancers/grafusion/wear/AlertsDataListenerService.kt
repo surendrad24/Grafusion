@@ -1,6 +1,5 @@
 package com.fusionlancers.grafusion.wear
 
-import android.content.ComponentName
 import android.content.Context
 import androidx.wear.tiles.TileService
 import com.google.android.gms.wearable.DataEvent
@@ -33,7 +32,7 @@ class AlertsDataListenerService : WearableListenerService() {
         }
         if (updated) {
             TileService.getUpdater(applicationContext)
-                .requestUpdate(ComponentName(this, AlertsTileService::class.java))
+                .requestUpdate(AlertsTileService::class.java)
         }
     }
 

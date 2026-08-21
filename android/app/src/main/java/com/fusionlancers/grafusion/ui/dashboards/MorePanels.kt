@@ -29,11 +29,20 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import android.graphics.BitmapFactory
 import com.fusionlancers.grafusion.data.model.Panel
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.ui.theme.DataPurple
@@ -52,7 +61,14 @@ import javax.xml.parsers.DocumentBuilderFactory
 // News (RSS/Atom)
 // ---------------------------------------------------------------------------
 
-data class RssItem(val title: String, val link: String?, val pubDate: String?, val description: String?)
+data class RssItem(
+    val title: String,
+    val link: String?,
+    val pubDate: String?,
+    val description: String?,
+    /** Extracted from RSS <enclosure>, <media:content>, <media:thumbnail>, or the first <img> in the description. */
+    val imageUrl: String? = null,
+)
 
 /**
  * Grafana's news panel options: { feedUrl: "https://...", showImage: true }.
@@ -63,6 +79,10 @@ data class RssItem(val title: String, val link: String?, val pubDate: String?, v
 fun NewsPanel(panel: Panel) {
     val feedUrl = remember(panel.options) {
         (panel.options?.get("feedUrl") as? JsonPrimitive)?.content
+    }
+    val showImage = remember(panel.options) {
+        // Grafana's default for showImage is true; only false when explicitly disabled.
+        (panel.options?.get("showImage") as? JsonPrimitive)?.content?.equals("false", ignoreCase = true) != true
     }
     if (feedUrl.isNullOrBlank()) {
         UnsupportedPanelBanner("news", "No feedUrl configured")
@@ -82,30 +102,67 @@ fun NewsPanel(panel: Panel) {
             items == null -> LoadingLine()
             items!!.isEmpty() -> EmptyLine("Feed is empty")
             else -> items!!.take(20).forEach { item ->
-                Column(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 4.dp)
                         .then(item.link?.let { Modifier.clickable { uriHandler.openUri(it) } } ?: Modifier),
+                    verticalAlignment = Alignment.Top,
                 ) {
-                    Text(
-                        item.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (item.link != null) EnergyOrange else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (!item.pubDate.isNullOrBlank()) {
+                    if (showImage && !item.imageUrl.isNullOrBlank()) {
+                        RssThumbnail(url = item.imageUrl)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
                         Text(
-                            item.pubDate,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            item.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (item.link != null) EnergyOrange else MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        if (!item.pubDate.isNullOrBlank()) {
+                            Text(
+                                item.pubDate,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                            )
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RssThumbnail(url: String) {
+    var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(url) {
+        runCatching {
+            withContext(Dispatchers.IO) {
+                val conn = URL(url).openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 10000
+                conn.setRequestProperty("User-Agent", "Grafusion/1.0")
+                conn.inputStream.use { BitmapFactory.decodeStream(it) }
+            }
+        }.onSuccess { bitmap = it }
+    }
+    val bmp = bitmap
+    if (bmp != null) {
+        Image(
+            painter = BitmapPainter(bmp.asImageBitmap()),
+            contentDescription = null,
+            modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)),
+        )
+    } else {
+        Box(
+            Modifier
+                .size(56.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp)),
+        )
     }
 }
 
@@ -129,6 +186,10 @@ private fun fetchRss(url: String): List<RssItem> {
                     link = map["link"],
                     pubDate = map["pubDate"],
                     description = map["description"],
+                    imageUrl = map["enclosureUrl"]
+                        ?: map["mediaContentUrl"]
+                        ?: map["mediaThumbnailUrl"]
+                        ?: map["description"]?.let { extractFirstImgSrc(it) },
                 )
             }.filter { it.title.isNotBlank() }
         }
@@ -142,6 +203,9 @@ private fun fetchRss(url: String): List<RssItem> {
                 link = map["linkHref"] ?: map["link"],
                 pubDate = map["updated"] ?: map["published"],
                 description = map["summary"] ?: map["content"],
+                imageUrl = map["mediaThumbnailUrl"]
+                    ?: map["mediaContentUrl"]
+                    ?: (map["summary"] ?: map["content"])?.let { extractFirstImgSrc(it) },
             )
         }.filter { it.title.isNotBlank() }
     }
@@ -156,10 +220,25 @@ private fun childText(n: org.w3c.dom.Node): Map<String, String> {
         if (name == "link" && c.attributes?.getNamedItem("href") != null) {
             out["linkHref"] = c.attributes.getNamedItem("href").nodeValue.orEmpty()
         }
+        // Media/enclosure image URLs live in attributes, not text content.
+        when (name) {
+            "enclosure" -> c.attributes?.getNamedItem("url")?.nodeValue?.takeIf { it.isNotBlank() }
+                ?.let { out.putIfAbsent("enclosureUrl", it) }
+            "media:content" -> c.attributes?.getNamedItem("url")?.nodeValue?.takeIf { it.isNotBlank() }
+                ?.let { out.putIfAbsent("mediaContentUrl", it) }
+            "media:thumbnail" -> c.attributes?.getNamedItem("url")?.nodeValue?.takeIf { it.isNotBlank() }
+                ?.let { out.putIfAbsent("mediaThumbnailUrl", it) }
+        }
         val txt = c.textContent?.trim().orEmpty()
         if (txt.isNotEmpty() && name !in out) out[name] = txt
     }
     return out
+}
+
+/** Grab the first <img src="..."> URL from an HTML fragment - handles single or double quotes. */
+private fun extractFirstImgSrc(html: String): String? {
+    val re = Regex("""<img[^>]+src\s*=\s*['"]([^'"]+)['"]""", RegexOption.IGNORE_CASE)
+    return re.find(html)?.groupValues?.getOrNull(1)
 }
 
 // ---------------------------------------------------------------------------
@@ -329,12 +408,15 @@ private fun formatDurationMs(v: Double): String = when {
  * element x/y/width/height + type ("rectangle", "text", "icon", ...). We render
  * rectangles and text so simple status boards work; complex elements fall through.
  */
+@OptIn(ExperimentalTextApi::class)
 @Composable
 fun CanvasPanel(panel: Panel) {
     val root = panel.options?.get("root") as? JsonObject
     val elements = (root?.get("elements") as? JsonArray) ?: run {
         UnsupportedPanelBanner("canvas", "No elements"); return
     }
+    val measurer = rememberTextMeasurer()
+    val labelColor = MaterialTheme.colorScheme.onSurface
     Box(Modifier.fillMaxWidth().height(220.dp).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))) {
         Canvas(modifier = Modifier.fillMaxWidth().height(220.dp)) {
             for (el in elements) {
@@ -347,14 +429,58 @@ fun CanvasPanel(panel: Panel) {
                 val eh = ((place?.get("height") as? JsonPrimitive)?.content?.toFloatOrNull() ?: 20f)
                 val bg = (((o["background"] as? JsonObject)?.get("color") as? JsonObject)?.get("fixed") as? JsonPrimitive)?.content
                 val color = bg?.let { runCatching { Color(android.graphics.Color.parseColor(it)) }.getOrNull() } ?: EnergyOrange
+                val cfg = o["config"] as? JsonObject
                 when (type) {
-                    "rectangle", "metric-value" -> drawRect(color = color.copy(alpha = 0.8f), topLeft = Offset(x, y), size = Size(ew, eh))
+                    "rectangle", "metric-value" -> {
+                        drawRect(color = color.copy(alpha = 0.8f), topLeft = Offset(x, y), size = Size(ew, eh))
+                        // metric-value elements typically carry a static text override in config.text.fixed.
+                        val label = (((cfg?.get("text") as? JsonObject)?.get("fixed")) as? JsonPrimitive)?.content
+                            ?: (cfg?.get("text") as? JsonPrimitive)?.content
+                        if (!label.isNullOrBlank()) {
+                            drawCanvasText(measurer, label, Offset(x + 4f, y + 2f), Size(ew - 8f, eh - 4f), Color.Black.copy(alpha = 0.85f))
+                        }
+                    }
                     "ellipse" -> drawArc(color = color.copy(alpha = 0.8f), startAngle = 0f, sweepAngle = 360f, useCenter = true, topLeft = Offset(x, y), size = Size(ew, eh))
+                    "text" -> {
+                        val txt = (((cfg?.get("text") as? JsonObject)?.get("fixed")) as? JsonPrimitive)?.content
+                            ?: (cfg?.get("text") as? JsonPrimitive)?.content
+                            ?: ""
+                        if (txt.isNotBlank()) {
+                            drawCanvasText(measurer, txt, Offset(x, y), Size(ew, eh), labelColor)
+                        }
+                    }
+                    "icon" -> {
+                        // Icons aren't rendered as SVG; fall back to a labeled outline so
+                        // element position is still meaningful on the board.
+                        drawRect(color = color.copy(alpha = 0.35f), topLeft = Offset(x, y), size = Size(ew, eh), style = Stroke(width = 1.5f))
+                        drawCanvasText(measurer, "icon", Offset(x + 2f, y + 2f), Size(ew - 4f, eh - 4f), labelColor.copy(alpha = 0.7f))
+                    }
                     else -> drawRect(color = color.copy(alpha = 0.3f), topLeft = Offset(x, y), size = Size(ew, eh), style = Stroke(width = 1.5f))
                 }
             }
         }
     }
+}
+
+@OptIn(ExperimentalTextApi::class)
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawCanvasText(
+    measurer: androidx.compose.ui.text.TextMeasurer,
+    text: String,
+    topLeft: Offset,
+    size: Size,
+    color: Color,
+) {
+    val layout = measurer.measure(
+        text = text,
+        style = TextStyle(color = color, fontSize = 11.sp),
+        constraints = androidx.compose.ui.unit.Constraints(
+            maxWidth = size.width.toInt().coerceAtLeast(1),
+            maxHeight = size.height.toInt().coerceAtLeast(1),
+        ),
+        overflow = TextOverflow.Ellipsis,
+        maxLines = 2,
+    )
+    drawText(textLayoutResult = layout, topLeft = topLeft)
 }
 
 // ---------------------------------------------------------------------------
