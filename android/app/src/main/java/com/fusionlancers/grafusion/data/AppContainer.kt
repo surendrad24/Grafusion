@@ -10,6 +10,7 @@ import com.fusionlancers.grafusion.data.prefs.ThemePreferences
 import com.fusionlancers.grafusion.data.repo.AccountRepository
 import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
+import com.fusionlancers.grafusion.data.repo.DatasourceRepository
 import com.fusionlancers.grafusion.data.repo.ExploreRepository
 import com.fusionlancers.grafusion.data.repo.LokiTailClient
 import com.fusionlancers.grafusion.data.repo.NotificationHistoryRepository
@@ -78,6 +79,11 @@ class AppContainer(context: Context) {
 
     val notificationHistoryRepository = NotificationHistoryRepository(
         dao = db.notificationHistoryDao(),
+    )
+
+    val datasourceRepository = DatasourceRepository(
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
     )
 
     val userPreferencesRepository = UserPreferencesRepository(

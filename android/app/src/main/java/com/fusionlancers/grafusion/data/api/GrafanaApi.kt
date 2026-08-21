@@ -69,6 +69,12 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
     ): List<Datasource>
 
+    @GET("api/datasources/uid/{uid}/health")
+    suspend fun datasourceHealth(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+    ): retrofit2.Response<DatasourceHealth>
+
     @POST("api/annotations")
     suspend fun createAnnotation(
         @Header("Authorization") auth: String,
@@ -335,6 +341,12 @@ data class Datasource(
     val type: String,
     val url: String = "",
     val isDefault: Boolean = false,
+)
+
+@Serializable
+data class DatasourceHealth(
+    val status: String = "UNKNOWN",
+    val message: String = "",
 )
 
 @Serializable

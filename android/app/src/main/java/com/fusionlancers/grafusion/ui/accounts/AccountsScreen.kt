@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -87,6 +88,7 @@ fun AccountsScreen(
     container: AppContainer,
     onOpenPermissions: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
+    onOpenDatasources: () -> Unit = {},
 ) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
@@ -198,6 +200,42 @@ fun AccountsScreen(
                         Icon(Icons.Filled.CloudSync, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Sync from Grafana")
+                    }
+                }
+            }
+        }
+
+        item {
+            SectionHeader(icon = Icons.Filled.Storage, title = "Diagnostics")
+            Spacer(Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            ) {
+                Column(Modifier.padding(16.dp)) {
+                    Text(
+                        "Datasource health",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Probe every Grafana datasource and show OK / ERROR from the plugin's own health check.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = onOpenDatasources,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Storage, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Open datasource list")
                     }
                 }
             }
