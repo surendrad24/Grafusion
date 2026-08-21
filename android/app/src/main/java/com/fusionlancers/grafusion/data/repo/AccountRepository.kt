@@ -30,6 +30,24 @@ class AccountRepository(
         accountDao.active().map { it?.toUi() }
 
     /**
+     * Push every stored cert pin into the API factory so the very next call goes through the
+     * pinned client. Called at app boot from GrafusionApp; without this an app restart would
+     * lose the pin registry (it lives in memory) until the user touched account settings.
+     */
+    suspend fun syncPinsToFactory() {
+        accountDao.all().first().forEach { acct ->
+            apiFactory.setPin(acct.grafanaUrl, acct.certPinSha256)
+        }
+    }
+
+    /** Persist a pin (or null to clear) for [accountId] and update the API factory in-place. */
+    suspend fun setPin(accountId: Long, pinSha256: String?) {
+        val acct = accountDao.byId(accountId) ?: return
+        accountDao.upsert(acct.copy(certPinSha256 = pinSha256))
+        apiFactory.setPin(acct.grafanaUrl, pinSha256)
+    }
+
+    /**
      * Verify credentials against Grafana with HTTP Basic auth by fetching /api/user,
      * then persist the credentials encrypted so future requests can reuse them.
      *
@@ -155,6 +173,7 @@ class AccountRepository(
         grafanaUrl = grafanaUrl,
         login = login,
         displayName = displayName,
+        certPinSha256 = certPinSha256,
     )
 
     private fun normalizeUrl(raw: String): String {

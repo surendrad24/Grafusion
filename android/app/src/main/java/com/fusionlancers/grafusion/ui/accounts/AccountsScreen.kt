@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
@@ -59,7 +60,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.runtime.setValue
 import java.text.DateFormat
 import java.util.Date
@@ -128,6 +133,12 @@ fun AccountsScreen(
             AccountCard(
                 account = account,
                 onSignOut = { scope.launch { container.accountRepository.logout(account.id) } },
+                onPinCert = { pin ->
+                    scope.launch {
+                        container.accountRepository.setPin(account.id, pin)
+                        snackbar.showSnackbar(if (pin == null) "TLS pin cleared" else "TLS pin saved")
+                    }
+                },
             )
         }
 
@@ -497,7 +508,13 @@ private fun SectionHeader(icon: androidx.compose.ui.graphics.vector.ImageVector,
 }
 
 @Composable
-private fun AccountCard(account: Account, onSignOut: () -> Unit) {
+private fun AccountCard(
+    account: Account,
+    onSignOut: () -> Unit,
+    onPinCert: (String?) -> Unit,
+) {
+    var pinDialogOpen by remember { mutableStateOf(false) }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -550,6 +567,14 @@ private fun AccountCard(account: Account, onSignOut: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
                 )
             }
+
+            Spacer(Modifier.height(10.dp))
+            TlsPinRow(
+                pinned = account.certPinSha256 != null,
+                httpsOnly = account.grafanaUrl.startsWith("https://", ignoreCase = true),
+                onManage = { pinDialogOpen = true },
+            )
+
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = onSignOut,
@@ -562,6 +587,126 @@ private fun AccountCard(account: Account, onSignOut: () -> Unit) {
             }
         }
     }
+
+    if (pinDialogOpen) {
+        TlsPinDialog(
+            account = account,
+            onDismiss = { pinDialogOpen = false },
+            onApply = { pin ->
+                pinDialogOpen = false
+                onPinCert(pin)
+            },
+        )
+    }
+}
+
+@Composable
+private fun TlsPinRow(pinned: Boolean, httpsOnly: Boolean, onManage: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            if (pinned) Icons.Filled.Lock else Icons.Filled.LockOpen,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = if (pinned) EnergyOrange else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+        )
+        Spacer(Modifier.size(6.dp))
+        Text(
+            when {
+                pinned -> "TLS certificate pinned"
+                !httpsOnly -> "TLS pin: unavailable on http://"
+                else -> "TLS pin: off (system-trust)"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f),
+            modifier = Modifier.weight(1f),
+        )
+        if (httpsOnly) {
+            androidx.compose.material3.TextButton(onClick = onManage) {
+                Text(if (pinned) "Manage" else "Pin…", color = EnergyOrange)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TlsPinDialog(
+    account: Account,
+    onDismiss: () -> Unit,
+    onApply: (String?) -> Unit,
+) {
+    var loading by remember { mutableStateOf(false) }
+    var currentFingerprint by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(account.id) {
+        loading = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching { com.fusionlancers.grafusion.data.api.GrafanaApiFactory.fetchLeafSpkiSha256(account.grafanaUrl) }
+        }
+        result
+            .onSuccess { currentFingerprint = it }
+            .onFailure { error = it.message ?: "Failed to fetch server certificate" }
+        loading = false
+    }
+
+    androidx.compose.ui.window.Dialog(onDismissRequest = onDismiss) {
+        Card(shape = RoundedCornerShape(20.dp)) {
+            Column(Modifier.padding(20.dp)) {
+                Text("TLS certificate pin", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Pinning refuses future connections to ${account.grafanaUrl} whose leaf certificate " +
+                        "public key does not match the SHA-256 below. Rotate the pin after any legitimate " +
+                        "cert renewal.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(12.dp))
+
+                account.certPinSha256?.let {
+                    Text("Current pin (SPKI SHA-256):", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                Text("Server presents:", style = MaterialTheme.typography.labelMedium)
+                when {
+                    loading -> Text("fetching...", style = MaterialTheme.typography.bodySmall)
+                    error != null -> Text(
+                        error!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    currentFingerprint != null -> Text(
+                        currentFingerprint!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    if (account.certPinSha256 != null) {
+                        androidx.compose.material3.TextButton(onClick = { onApply(null) }) { Text("Clear pin") }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
+                    Spacer(Modifier.width(6.dp))
+                    androidx.compose.material3.Button(
+                        onClick = { currentFingerprint?.let(onApply) },
+                        enabled = currentFingerprint != null,
+                    ) { Text(if (account.certPinSha256 == null) "Pin" else "Replace pin") }
+                }
+            }
+        }
+    }
+    // Silence unused-scope warning; kept as an anchor if we later add a "test connection" button.
+    @Suppress("UNUSED_EXPRESSION") scope
 }
 
 @Composable

@@ -6,6 +6,8 @@ data class Account(
     val grafanaUrl: String,
     val login: String,
     val displayName: String,
+    /** Non-null when a TLS pin is active for this account. UI shows a badge + "unpin" affordance. */
+    val certPinSha256: String? = null,
 )
 
 /** UI-facing dashboard summary. */

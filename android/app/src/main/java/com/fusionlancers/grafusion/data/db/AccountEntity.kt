@@ -20,4 +20,11 @@ data class AccountEntity(
      * The token itself is NEVER persisted in Room.
      */
     val tokenVaultKey: String,
+    /**
+     * Optional SPKI SHA-256 pin (base64) of the server's leaf certificate. When set,
+     * the OkHttp client refuses handshakes whose cert chain does not include this pin -
+     * a defensive TOFU (trust-on-first-use) guard for self-hosted HTTPS instances
+     * that don't chain to a public CA. Null means default system-trust validation.
+     */
+    val certPinSha256: String? = null,
 )

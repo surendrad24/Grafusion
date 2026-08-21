@@ -14,6 +14,9 @@ interface AccountDao {
     @Query("SELECT * FROM accounts WHERE active = 1 LIMIT 1")
     fun active(): Flow<AccountEntity?>
 
+    @Query("SELECT * FROM accounts WHERE id = :id LIMIT 1")
+    suspend fun byId(id: Long): AccountEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(account: AccountEntity): Long
 
