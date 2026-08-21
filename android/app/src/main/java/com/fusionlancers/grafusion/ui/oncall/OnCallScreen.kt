@@ -22,31 +22,44 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,6 +74,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.fusionlancers.grafusion.data.AppContainer
+import com.fusionlancers.grafusion.data.db.LocalScheduleEntity
 import com.fusionlancers.grafusion.data.model.Incident
 import com.fusionlancers.grafusion.data.model.IncidentState
 import com.fusionlancers.grafusion.data.model.ScheduleSnapshot
@@ -69,10 +83,13 @@ import com.fusionlancers.grafusion.ui.theme.EnergyOrange
 import kotlinx.coroutines.launch
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import java.util.Calendar
 
-private enum class OnCallTab { Schedules, Incidents }
+private enum class OnCallTab { Schedules, Incidents, Local }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,6 +101,10 @@ fun OnCallScreen(container: AppContainer) {
     var error by remember { mutableStateOf<String?>(null) }
     var tab by remember { mutableStateOf(OnCallTab.Schedules) }
     val snackbar = remember { SnackbarHostState() }
+    val localSnapshots by container.localOnCallRepository.observe()
+        .collectAsState(initial = emptyList())
+    val localSchedules by container.localOnCallRepository.observeSchedules()
+        .collectAsState(initial = emptyList())
 
     fun reload() {
         scope.launch {
@@ -102,6 +123,16 @@ fun OnCallScreen(container: AppContainer) {
     }
 
     LaunchedEffect(Unit) { reload() }
+
+    LaunchedEffect(error) {
+        // If the Grafana OnCall plugin isn't installed, quietly land the user on the Local tab so
+        // the screen still does something useful instead of just showing an error.
+        if (error?.contains("plugin is not installed", ignoreCase = true) == true &&
+            tab == OnCallTab.Schedules
+        ) {
+            tab = OnCallTab.Local
+        }
+    }
 
     Column(Modifier.fillMaxSize().padding(top = 8.dp)) {
         Row(
@@ -129,6 +160,7 @@ fun OnCallScreen(container: AppContainer) {
         ) {
             TabPill("Schedules ${schedules.size}", tab == OnCallTab.Schedules) { tab = OnCallTab.Schedules }
             TabPill("Incidents ${incidents.size}", tab == OnCallTab.Incidents) { tab = OnCallTab.Incidents }
+            TabPill("Local ${localSchedules.size}", tab == OnCallTab.Local) { tab = OnCallTab.Local }
         }
 
         Spacer(Modifier.height(12.dp))
@@ -139,6 +171,21 @@ fun OnCallScreen(container: AppContainer) {
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
+                tab == OnCallTab.Local -> LocalTab(
+                    snapshots = localSnapshots,
+                    schedules = localSchedules,
+                    onCreateSchedule = { name ->
+                        scope.launch { container.localOnCallRepository.createSchedule(name) }
+                    },
+                    onDeleteSchedule = { id ->
+                        scope.launch { container.localOnCallRepository.deleteSchedule(id) }
+                    },
+                    onAddShift = { scheduleId, user, startMs, endMs ->
+                        scope.launch {
+                            container.localOnCallRepository.addShift(scheduleId, user, startMs, endMs)
+                        }
+                    },
+                )
                 error != null -> ErrorState(error!!)
                 refreshing && schedules.isEmpty() && incidents.isEmpty() -> LoadingState()
                 tab == OnCallTab.Schedules -> SchedulesList(schedules)
@@ -488,6 +535,316 @@ private fun humanShiftWindow(start: String?, end: String?): String {
         s != null && e != null -> "${timeFormatter.format(s)} -> ${timeFormatter.format(e)}"
         s != null -> "from ${timeFormatter.format(s)}"
         else -> ""
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun LocalTab(
+    snapshots: List<ScheduleSnapshot>,
+    schedules: List<LocalScheduleEntity>,
+    onCreateSchedule: (String) -> Unit,
+    onDeleteSchedule: (Long) -> Unit,
+    onAddShift: (scheduleId: Long, user: String, startMs: Long, endMs: Long) -> Unit,
+) {
+    var showCreate by remember { mutableStateOf(false) }
+    var addShiftFor by remember { mutableStateOf<LocalScheduleEntity?>(null) }
+
+    if (schedules.isEmpty()) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(Icons.Filled.Schedule, null, tint = EnergyOrange, modifier = Modifier.size(56.dp))
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "No local schedules yet",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Create a rotation on the phone when the Grafana OnCall plugin isn't installed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { showCreate = true },
+                colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+            ) {
+                Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("New schedule")
+            }
+        }
+    } else {
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Button(
+                        onClick = { showCreate = true },
+                        colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                    ) {
+                        Icon(Icons.Filled.Add, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("New schedule")
+                    }
+                }
+            }
+            items(schedules, key = { it.id }) { sched ->
+                val snapshot = snapshots.firstOrNull { it.id == "local-${sched.id}" }
+                LocalScheduleCard(
+                    entity = sched,
+                    snapshot = snapshot,
+                    onAddShift = { addShiftFor = sched },
+                    onDelete = { onDeleteSchedule(sched.id) },
+                )
+            }
+        }
+    }
+
+    if (showCreate) {
+        AddScheduleDialog(
+            onDismiss = { showCreate = false },
+            onConfirm = { name ->
+                onCreateSchedule(name)
+                showCreate = false
+            },
+        )
+    }
+    addShiftFor?.let { sched ->
+        AddShiftDialog(
+            scheduleName = sched.name,
+            onDismiss = { addShiftFor = null },
+            onConfirm = { user, startMs, endMs ->
+                onAddShift(sched.id, user, startMs, endMs)
+                addShiftFor = null
+            },
+        )
+    }
+}
+
+@Composable
+private fun LocalScheduleCard(
+    entity: LocalScheduleEntity,
+    snapshot: ScheduleSnapshot?,
+    onAddShift: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    entity.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                IconButton(onClick = onAddShift) {
+                    Icon(Icons.Filled.PersonAdd, contentDescription = "Add shift", tint = EnergyOrange)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Filled.Delete,
+                        contentDescription = "Delete schedule",
+                        tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            val current = snapshot?.currentOnCall.orEmpty()
+            if (current.isEmpty()) {
+                Text(
+                    "No one is currently on-call",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            } else {
+                current.forEach { user -> OnCallRow(user, badge = "NOW", badgeColor = EnergyOrange) }
+            }
+            val upcoming = snapshot?.upcoming.orEmpty()
+            if (upcoming.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Upcoming",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.height(6.dp))
+                upcoming.forEach { shift -> UpcomingRow(shift) }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddScheduleDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New schedule") },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text("Name") },
+                placeholder = { Text("Primary rotation") },
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name.trim().ifBlank { "Untitled" }) },
+            ) { Text("Create") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddShiftDialog(
+    scheduleName: String,
+    onDismiss: () -> Unit,
+    onConfirm: (user: String, startMs: Long, endMs: Long) -> Unit,
+) {
+    val now = remember { Calendar.getInstance() }
+    var user by remember { mutableStateOf("") }
+    // Default to a shift that starts now and runs 8 hours - a common on-call window and easy to nudge.
+    var startMs by remember { mutableStateOf(now.timeInMillis) }
+    var endMs by remember { mutableStateOf(now.timeInMillis + 8L * 60 * 60 * 1000) }
+    var pickingStart by remember { mutableStateOf(false) }
+    var pickingEnd by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add shift to $scheduleName", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = user,
+                    onValueChange = { user = it },
+                    singleLine = true,
+                    label = { Text("On-call user") },
+                    placeholder = { Text("alice@example.com") },
+                )
+                Spacer(Modifier.height(12.dp))
+                ShiftEndpointRow(label = "Starts", millis = startMs, onClick = { pickingStart = true })
+                Spacer(Modifier.height(6.dp))
+                ShiftEndpointRow(label = "Ends", millis = endMs, onClick = { pickingEnd = true })
+                if (endMs <= startMs) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "End must be after start",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = endMs > startMs,
+                onClick = { onConfirm(user.trim().ifBlank { "unassigned" }, startMs, endMs) },
+            ) { Text("Add") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+
+    if (pickingStart) {
+        DateTimePickerDialog(
+            initialMs = startMs,
+            onDismiss = { pickingStart = false },
+            onPicked = { startMs = it; pickingStart = false },
+        )
+    }
+    if (pickingEnd) {
+        DateTimePickerDialog(
+            initialMs = endMs,
+            onDismiss = { pickingEnd = false },
+            onPicked = { endMs = it; pickingEnd = false },
+        )
+    }
+}
+
+@Composable
+private fun ShiftEndpointRow(label: String, millis: Long, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Icon(Icons.Filled.Schedule, null, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.size(8.dp))
+        Text("$label: ${timeFormatter.format(Instant.ofEpochMilli(millis))}")
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DateTimePickerDialog(
+    initialMs: Long,
+    onDismiss: () -> Unit,
+    onPicked: (Long) -> Unit,
+) {
+    val initial = remember(initialMs) {
+        LocalDateTime.ofInstant(Instant.ofEpochMilli(initialMs), ZoneId.systemDefault())
+    }
+    var pickedDateMs by remember { mutableStateOf<Long?>(null) }
+
+    if (pickedDateMs == null) {
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = initialMs)
+        DatePickerDialog(
+            onDismissRequest = onDismiss,
+            confirmButton = {
+                TextButton(onClick = { pickedDateMs = dateState.selectedDateMillis ?: initialMs }) {
+                    Text("Next")
+                }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        ) { DatePicker(state = dateState) }
+    } else {
+        val timeState = rememberTimePickerState(
+            initialHour = initial.hour,
+            initialMinute = initial.minute,
+            is24Hour = true,
+        )
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Pick time") },
+            text = { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { TimePicker(state = timeState) } },
+            confirmButton = {
+                TextButton(onClick = {
+                    // DatePicker emits a UTC-midnight epoch; add the picked wall-clock time interpreted in the
+                    // user's zone so the resulting instant matches what they see on-screen.
+                    val dateUtc = LocalDateTime.ofInstant(
+                        Instant.ofEpochMilli(pickedDateMs!!),
+                        ZoneOffset.UTC,
+                    ).toLocalDate()
+                    val ldt = dateUtc.atTime(timeState.hour, timeState.minute)
+                    onPicked(ldt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
+                }) { Text("OK") }
+            },
+            dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        )
     }
 }
 
