@@ -108,6 +108,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1449,7 +1450,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "bargauge" -> BarGaugePanel(panel, data)
         "table" -> TablePanel(data)
         "barchart" -> BarChartPanel(panel, data)
-        "piechart" -> PieChartPanel(data)
+        "piechart" -> PieChartPanel(panel, data)
         "heatmap" -> HeatmapPanel(data)
         "state-timeline", "status-history" -> StateTimelinePanel(data)
         "logs" -> LogsPanel(data)
@@ -2279,27 +2280,73 @@ private fun HeatmapPanel(data: PanelData) {
     val maxVal = cells.flatten().maxOrNull()?.takeIf { it > 0 } ?: run { PanelNoData(); return }
     val cols = frame.rowCount
     val rows = bucketIdxs.size
-    Canvas(Modifier.fillMaxWidth().height(180.dp)) {
-        val cw = size.width / cols
-        val ch = size.height / rows
-        for (r in 0 until rows) {
-            val rowVals = cells[r]
-            for (c in 0 until cols) {
-                val v = rowVals.getOrNull(c) ?: 0.0
-                if (v <= 0) continue
-                val t = (v / maxVal).toFloat().coerceIn(0f, 1f)
-                val color = Color(
-                    red = 1f,
-                    green = (1f - t * 0.9f).coerceIn(0f, 1f),
-                    blue = (0.25f * (1f - t)).coerceIn(0f, 1f),
-                    alpha = (0.35f + 0.55f * t).coerceIn(0f, 1f),
-                )
+    Column(Modifier.fillMaxWidth()) {
+        Canvas(Modifier.fillMaxWidth().height(180.dp)) {
+            val cw = size.width / cols
+            val ch = size.height / rows
+            for (r in 0 until rows) {
+                val rowVals = cells[r]
+                for (c in 0 until cols) {
+                    val v = rowVals.getOrNull(c) ?: 0.0
+                    if (v <= 0) continue
+                    val t = (v / maxVal).toFloat().coerceIn(0f, 1f)
+                    drawRect(
+                        color = thermalColor(t),
+                        topLeft = androidx.compose.ui.geometry.Offset(c * cw, (rows - 1 - r) * ch),
+                        size = androidx.compose.ui.geometry.Size(cw + 0.5f, ch + 0.5f),
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        HeatmapScaleBar(maxVal = maxVal)
+    }
+}
+
+@Composable
+private fun HeatmapScaleBar(maxVal: Double) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text("0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+        Spacer(Modifier.width(6.dp))
+        Canvas(Modifier.weight(1f).height(8.dp)) {
+            val steps = 32
+            val cw = size.width / steps
+            for (i in 0 until steps) {
+                val t = i / (steps - 1f)
                 drawRect(
-                    color = color,
-                    topLeft = androidx.compose.ui.geometry.Offset(c * cw, (rows - 1 - r) * ch),
-                    size = androidx.compose.ui.geometry.Size(cw + 0.5f, ch + 0.5f),
+                    color = thermalColor(t),
+                    topLeft = androidx.compose.ui.geometry.Offset(i * cw, 0f),
+                    size = androidx.compose.ui.geometry.Size(cw + 0.5f, size.height),
                 )
             }
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(
+            formatCompact(maxVal),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+    }
+}
+
+private fun thermalColor(t: Float): Color {
+    val c = t.coerceIn(0f, 1f)
+    return when {
+        c < 0.25f -> {
+            val f = c / 0.25f
+            Color(red = 0.05f, green = 0.15f + 0.35f * f, blue = 0.4f + 0.5f * f, alpha = 0.5f + 0.3f * f)
+        }
+        c < 0.5f -> {
+            val f = (c - 0.25f) / 0.25f
+            Color(red = 0.05f + 0.15f * f, green = 0.5f + 0.4f * f, blue = 0.9f - 0.5f * f, alpha = 0.8f)
+        }
+        c < 0.75f -> {
+            val f = (c - 0.5f) / 0.25f
+            Color(red = 0.2f + 0.7f * f, green = 0.9f, blue = 0.4f - 0.3f * f, alpha = 0.9f)
+        }
+        else -> {
+            val f = (c - 0.75f) / 0.25f
+            Color(red = 0.9f + 0.1f * f, green = 0.9f - 0.6f * f, blue = 0.1f, alpha = 0.95f)
         }
     }
 }
@@ -2318,12 +2365,21 @@ private fun StateTimelinePanel(data: PanelData) {
     val span = (tMax - tMin).takeIf { it > 0 } ?: run { PanelNoData(); return }
     val palette = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFEF4444), Color(0xFFFACC15), Color(0xFF22D3EE))
     val rowH = 24.dp
+    val labelPaint = remember {
+        android.graphics.Paint().apply {
+            color = android.graphics.Color.WHITE
+            textSize = 26f
+            isAntiAlias = true
+            textAlign = android.graphics.Paint.Align.CENTER
+        }
+    }
     Column(Modifier.fillMaxWidth()) {
         stateIdxs.forEach { idx ->
             val name = frame.fieldNames.getOrNull(idx).orEmpty()
             val col = frame.columns[idx]
             Text(name, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f))
             Canvas(Modifier.fillMaxWidth().height(rowH)) {
+                val gap = 1.5f
                 var runStart = 0
                 for (i in 1..times.size) {
                     val curr = col.getOrNull(i.coerceAtMost(col.size - 1))
@@ -2334,11 +2390,21 @@ private fun StateTimelinePanel(data: PanelData) {
                         val x1 = ((times[(i - 1).coerceIn(0, times.size - 1)].toDouble() - tMin) / span * size.width).toFloat()
                         val colorIdx = kotlin.math.abs(prev?.hashCode() ?: 0) % palette.size
                         val color = if (prev == null) Color.Transparent else palette[colorIdx]
+                        val width = (x1 - x0 - gap).coerceAtLeast(1f)
                         drawRect(
                             color = color,
                             topLeft = androidx.compose.ui.geometry.Offset(x0, 0f),
-                            size = androidx.compose.ui.geometry.Size((x1 - x0).coerceAtLeast(1f), size.height),
+                            size = androidx.compose.ui.geometry.Size(width, size.height),
                         )
+                        val label = prev?.toString().orEmpty()
+                        if (label.isNotEmpty() && width > 40f) {
+                            drawContext.canvas.nativeCanvas.drawText(
+                                label,
+                                x0 + width / 2f,
+                                size.height / 2f + 9f,
+                                labelPaint,
+                            )
+                        }
                         runStart = i
                     }
                 }
@@ -2349,24 +2415,49 @@ private fun StateTimelinePanel(data: PanelData) {
 }
 
 @Composable
-private fun PieChartPanel(data: PanelData) {
+private fun PieChartPanel(panel: Panel, data: PanelData) {
     val pairs = remember(data) { extractBarPairs(data) }
     if (pairs.isEmpty()) { PanelNoData(); return }
     val slices = pairs.take(8)
     val total = slices.sumOf { it.second }.takeIf { it > 0.0 } ?: run { PanelNoData(); return }
     val palette = listOf(EnergyOrange, DataPurple, Color(0xFF34D399), Color(0xFF60A5FA), Color(0xFFF472B6), Color(0xFFFACC15), Color(0xFF22D3EE), Color(0xFFEF4444))
+    // Grafana pie chart "pieType": "pie" (default) | "donut".
+    val donut = ((panel.options?.get("pieType") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "pie") == "donut"
+    val surfaceColor = MaterialTheme.colorScheme.surface
     Row(Modifier.fillMaxWidth().height(220.dp), verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(180.dp).padding(16.dp)) {
-            var start = -90f
-            slices.forEachIndexed { idx, (_, v) ->
-                val sweep = (v / total * 360.0).toFloat()
-                drawArc(
-                    color = palette[idx % palette.size],
-                    startAngle = start,
-                    sweepAngle = sweep,
-                    useCenter = true,
-                )
-                start += sweep
+        Box(Modifier.size(180.dp).padding(16.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                var start = -90f
+                slices.forEachIndexed { idx, (_, v) ->
+                    val sweep = (v / total * 360.0).toFloat()
+                    drawArc(
+                        color = palette[idx % palette.size],
+                        startAngle = start,
+                        sweepAngle = sweep,
+                        useCenter = true,
+                    )
+                    start += sweep
+                }
+                if (donut) {
+                    val holeR = size.minDimension * 0.55f / 2f
+                    drawCircle(color = surfaceColor, radius = holeR)
+                }
+            }
+            if (donut) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        formatValue(total, panel.unit, panel.decimals),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                    )
+                    Text(
+                        "Total",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    )
+                }
             }
         }
         Spacer(Modifier.width(8.dp))
@@ -2376,11 +2467,19 @@ private fun PieChartPanel(data: PanelData) {
                     Box(Modifier.size(10.dp).background(palette[idx % palette.size], RoundedCornerShape(2.dp)))
                     Spacer(Modifier.width(6.dp))
                     Text(
-                        "$label · ${"%.0f%%".format(v / total * 100)}",
+                        label,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "${formatValue(v, panel.unit, panel.decimals)} · ${"%.0f%%".format(v / total * 100)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        maxLines = 1,
                     )
                 }
             }
