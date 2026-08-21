@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -1459,6 +1461,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun TimeseriesPanel(data: PanelData) {
     val validSeries = remember(data) {
@@ -1516,40 +1519,66 @@ private fun TimeseriesPanel(data: PanelData) {
     }
     if (validSeries.size > 1) {
         Spacer(Modifier.height(6.dp))
-        Column(Modifier.fillMaxWidth()) {
-            validSeries.take(6).forEachIndexed { idx, (s, _) ->
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            validSeries.take(12).forEachIndexed { idx, (s, pairs) ->
                 val isHidden = s.name in hidden
+                val chipColor = if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
+                                else lineColors[idx % lineColors.size]
+                val last = pairs.last().second
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 2.dp)
+                        .background(
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = if (isHidden) 0.04f else 0.06f),
+                            RoundedCornerShape(50),
+                        )
                         .pointerInput(s.name) {
                             detectTapGestures(onTap = {
                                 if (isHidden) hidden.remove(s.name) else hidden.add(s.name)
                             })
-                        },
+                        }
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
                 ) {
                     Box(
                         Modifier
-                            .size(10.dp)
-                            .background(
-                                if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.25f)
-                                else lineColors[idx % lineColors.size],
-                                RoundedCornerShape(2.dp),
-                            )
+                            .size(8.dp)
+                            .background(chipColor, RoundedCornerShape(50))
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
                         s.name,
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isHidden) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.45f)
-                                else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                                else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                     )
+                    if (!isHidden) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            formatCompact(last),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+private fun formatCompact(v: Double): String {
+    val abs = kotlin.math.abs(v)
+    return when {
+        abs >= 1_000_000_000 -> String.format(Locale.US, "%.1fB", v / 1_000_000_000)
+        abs >= 1_000_000 -> String.format(Locale.US, "%.1fM", v / 1_000_000)
+        abs >= 1_000 -> String.format(Locale.US, "%.1fk", v / 1_000)
+        abs >= 10 -> String.format(Locale.US, "%.0f", v)
+        else -> String.format(Locale.US, "%.2f", v)
     }
 }
 
