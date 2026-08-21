@@ -1446,7 +1446,7 @@ private fun PanelBody(panel: Panel, data: PanelData, cardWidth: Dp) {
         "stat", "gauge" -> StatOrGaugePanel(panel, data, cardWidth)
         "bargauge" -> BarGaugePanel(panel, data)
         "table" -> TablePanel(data)
-        "barchart" -> BarChartPanel(data)
+        "barchart" -> BarChartPanel(panel, data)
         "piechart" -> PieChartPanel(data)
         "heatmap" -> HeatmapPanel(data)
         "state-timeline", "status-history" -> StateTimelinePanel(data)
@@ -1554,12 +1554,12 @@ private fun TimeseriesPanel(data: PanelData) {
 }
 
 @Composable
-private fun BarChartPanel(data: PanelData) {
-    // Three shapes we handle:
-    // A) Grouped categorical: one frame with a string column (categories) + N number columns (series).
-    //    Renders as side-by-side grouped columns per category.
-    // B) Prometheus format=table+instant: one frame per label combo -> single-series column chart.
-    // C) Single frame with a label column (string) + one value column -> single-series column chart.
+private fun BarChartPanel(panel: Panel, data: PanelData) {
+    // Grafana barchart options.orientation: "auto" | "vertical" | "horizontal".
+    // "auto" flips to horizontal when there are many categories, matching Grafana's default heuristic.
+    val orientationOpt = (panel.options?.get("orientation") as? kotlinx.serialization.json.JsonPrimitive)?.content
+    val showValues = (panel.options?.get("showValue") as? kotlinx.serialization.json.JsonPrimitive)?.content != "never"
+
     val grouped = remember(data) { extractGroupedBars(data) }
     if (grouped != null && grouped.seriesValues.size > 1) {
         GroupedBarChart(grouped)
@@ -1567,7 +1567,82 @@ private fun BarChartPanel(data: PanelData) {
     }
     val labeledPairs = grouped?.toSinglePairs() ?: extractBarPairs(data)
     if (labeledPairs.isEmpty()) { PanelNoData(); return }
-    SingleSeriesBarChart(labeledPairs)
+    val horizontal = orientationOpt == "horizontal" ||
+        (orientationOpt == null || orientationOpt == "auto") && labeledPairs.size > 8
+    if (horizontal) {
+        HorizontalBarChart(labeledPairs, panel.unit, panel.decimals, showValues)
+    } else {
+        SingleSeriesBarChart(labeledPairs)
+    }
+}
+
+@Composable
+private fun HorizontalBarChart(
+    pairs: List<Pair<String, Double>>,
+    unit: String?,
+    decimals: Int?,
+    showValues: Boolean,
+) {
+    val maxVal = pairs.maxOfOrNull { kotlin.math.abs(it.second) }?.takeIf { it > 0.0 } ?: 1.0
+    val labelW = 96.dp
+    Column(Modifier.fillMaxWidth()) {
+        pairs.take(14).forEachIndexed { idx, (label, v) ->
+            val frac = (v / maxVal).coerceIn(-1.0, 1.0).toFloat().let { kotlin.math.abs(it) }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
+                    modifier = Modifier.width(labelW),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.width(6.dp))
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(16.dp)
+                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), RoundedCornerShape(3.dp))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth(frac)
+                            .height(16.dp)
+                            .background(barSeriesColor(idx), RoundedCornerShape(3.dp))
+                    )
+                    if (showValues) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterEnd) {
+                            Text(
+                                formatValue(v, unit, decimals),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.padding(end = 6.dp),
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth().padding(start = labelW + 6.dp)) {
+            Text(
+                "0",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                formatValue(maxVal, unit, decimals),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+        }
+    }
 }
 
 @Composable
