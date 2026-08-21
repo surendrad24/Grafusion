@@ -102,7 +102,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -1634,7 +1637,14 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
         val calcs = reduce?.get("calcs") as? kotlinx.serialization.json.JsonArray
         (calcs?.firstOrNull() as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "lastNotNull"
     }
-    val seriesValues = data.series.firstOrNull()?.values?.filterNotNull().orEmpty()
+    // Grafana stat "graphMode": "area" (default) draws a sparkline behind the value.
+    // "none" suppresses it. Gauge panels never sparkline.
+    val graphMode = remember(panel.options, panel.type) {
+        if (panel.type == "gauge") "none"
+        else (panel.options?.get("graphMode") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: "area"
+    }
+    val firstSeries = data.series.firstOrNull()
+    val seriesValues = firstSeries?.values?.filterNotNull().orEmpty()
     val frameValues = data.frames.firstOrNull()?.let { frame ->
         frame.columns.getOrNull(frame.fieldTypes.indexOfFirst { it == "number" })
             ?.mapNotNull { (it as? Number)?.toDouble() }
@@ -1645,12 +1655,27 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
         latest == null -> "-"
         else -> formatValue(latest, panel.unit, panel.decimals)
     }
-    // Scale value font to fit narrow cards without letter-wrapping.
-    // Rough char-width heuristic: at 24sp, one char ~= 12dp; leave 16dp padding on each side.
     val availableDp = (cardWidth.value - 32f).coerceAtLeast(48f)
     val approxCharDp = availableDp / display.length.coerceAtLeast(1)
     val fontSize = (approxCharDp * 1.9f).coerceIn(16f, 34f)
+
+    val sparklinePoints = remember(firstSeries, graphMode) {
+        if (graphMode != "area" && graphMode != "line") return@remember emptyList()
+        val pairs = firstSeries?.let { s -> s.timestamps.zip(s.values) }?.mapNotNull { (t, v) ->
+            v?.let { t to it }
+        }.orEmpty()
+        if (pairs.size < 2) emptyList() else pairs
+    }
+
     Box(Modifier.fillMaxWidth().heightIn(min = 72.dp), contentAlignment = Alignment.Center) {
+        if (sparklinePoints.isNotEmpty()) {
+            Sparkline(
+                pairs = sparklinePoints,
+                color = EnergyOrange,
+                filled = graphMode == "area",
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Text(
             display,
             fontSize = fontSize.sp,
@@ -1659,6 +1684,57 @@ private fun StatOrGaugePanel(panel: Panel, data: PanelData, cardWidth: Dp) {
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun Sparkline(
+    pairs: List<Pair<Long, Double>>,
+    color: Color,
+    filled: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        if (w <= 0f || h <= 0f) return@Canvas
+        val minT = pairs.first().first.toDouble()
+        val maxT = pairs.last().first.toDouble()
+        val tSpan = (maxT - minT).takeIf { it > 0.0 } ?: 1.0
+        val ys = pairs.map { it.second }
+        val minY = ys.min()
+        val maxY = ys.max()
+        val ySpan = (maxY - minY).takeIf { it > 0.0 } ?: 1.0
+        // Reserve top/bottom padding so the sparkline sits behind the number without cropping.
+        val vPad = h * 0.15f
+        val plotH = h - vPad * 2f
+
+        fun x(t: Long) = ((t.toDouble() - minT) / tSpan).toFloat() * w
+        fun y(v: Double) = vPad + plotH - ((v - minY) / ySpan).toFloat() * plotH
+
+        val linePath = Path().apply {
+            moveTo(x(pairs.first().first), y(pairs.first().second))
+            for (i in 1 until pairs.size) lineTo(x(pairs[i].first), y(pairs[i].second))
+        }
+        if (filled) {
+            val areaPath = Path().apply {
+                moveTo(x(pairs.first().first), h)
+                for (p in pairs) lineTo(x(p.first), y(p.second))
+                lineTo(x(pairs.last().first), h)
+                close()
+            }
+            drawPath(
+                path = areaPath,
+                brush = Brush.verticalGradient(
+                    colors = listOf(color.copy(alpha = 0.35f), color.copy(alpha = 0.02f)),
+                ),
+            )
+        }
+        drawPath(
+            path = linePath,
+            color = color.copy(alpha = 0.65f),
+            style = Stroke(width = 2f),
         )
     }
 }
