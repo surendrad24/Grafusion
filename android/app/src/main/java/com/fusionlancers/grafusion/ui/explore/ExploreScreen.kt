@@ -22,6 +22,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material3.Button
@@ -43,8 +45,10 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,7 +64,9 @@ import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.data.api.Datasource
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.RawFrame
+import com.fusionlancers.grafusion.data.repo.TailEvent
 import com.fusionlancers.grafusion.ui.theme.EnergyOrange
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -82,6 +88,11 @@ fun ExploreScreen(container: AppContainer) {
     var result by remember { mutableStateOf<PanelData?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    // Loki live-tail: the collector job is what we cancel to close the socket.
+    var tailJob by remember { mutableStateOf<Job?>(null) }
+    val tailLines = remember { mutableStateListOf<TailEvent.Line>() }
+    var tailError by remember { mutableStateOf<String?>(null) }
+    val isTailing = tailJob != null
 
     LaunchedEffect(Unit) {
         container.exploreRepository.listDatasources()
@@ -195,36 +206,86 @@ fun ExploreScreen(container: AppContainer) {
                 }
             }
 
-            Button(
-                onClick = {
-                    val ds = selectedDs ?: return@Button
-                    if (query.isBlank()) return@Button
-                    scope.launch {
-                        running = true
-                        error = null
-                        container.exploreRepository.runQuery(ds, query, from = timeRange, to = "now")
-                            .onSuccess { result = it; error = it.error }
-                            .onFailure { error = it.message ?: "Query failed"; result = null }
-                        running = false
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        val ds = selectedDs ?: return@Button
+                        if (query.isBlank()) return@Button
+                        // Stop any live tail if the user runs a one-shot query.
+                        tailJob?.cancel(); tailJob = null
+                        scope.launch {
+                            running = true
+                            error = null
+                            container.exploreRepository.runQuery(ds, query, from = timeRange, to = "now")
+                                .onSuccess { result = it; error = it.error }
+                                .onFailure { error = it.message ?: "Query failed"; result = null }
+                            running = false
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                    enabled = selectedDs != null && query.isNotBlank() && !running,
+                ) {
+                    if (running) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = Color.White,
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text("Running…")
+                    } else {
+                        Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("Run query")
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
-                enabled = selectedDs != null && query.isNotBlank() && !running,
-            ) {
-                if (running) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(16.dp),
-                        strokeWidth = 2.dp,
-                        color = Color.White,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text("Running…")
-                } else {
-                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(6.dp))
-                    Text("Run query")
                 }
+                // Live-tail is Loki-only; Grafana proxies the /loki/api/v1/tail WebSocket for us.
+                if (selectedDs?.type.equals("loki", ignoreCase = true)) {
+                    Button(
+                        onClick = {
+                            if (isTailing) {
+                                tailJob?.cancel(); tailJob = null
+                            } else {
+                                val ds = selectedDs ?: return@Button
+                                if (query.isBlank()) return@Button
+                                tailError = null
+                                tailLines.clear()
+                                result = null
+                                tailJob = scope.launch {
+                                    container.lokiTailClient.tail(ds, query).collect { ev ->
+                                        when (ev) {
+                                            is TailEvent.Line -> {
+                                                tailLines.add(ev)
+                                                // Rolling buffer: 500 lines keeps memory bounded.
+                                                if (tailLines.size > 500) tailLines.removeAt(0)
+                                            }
+                                            is TailEvent.Error -> tailError = ev.message
+                                            TailEvent.Closed -> { /* awaitClose in the flow handles it */ }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isTailing) Color(0xFFE74C3C) else MaterialTheme.colorScheme.surfaceVariant,
+                            contentColor = if (isTailing) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        ),
+                        enabled = query.isNotBlank(),
+                    ) {
+                        Icon(
+                            if (isTailing) Icons.Filled.Stop else Icons.Filled.RadioButtonChecked,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.size(4.dp))
+                        Text(if (isTailing) "Stop" else "Live")
+                    }
+                }
+            }
+
+            DisposableEffect(Unit) {
+                onDispose { tailJob?.cancel() }
             }
 
             error?.let { msg ->
@@ -241,11 +302,96 @@ fun ExploreScreen(container: AppContainer) {
                 }
             }
 
-            result?.let { data ->
-                ResultsPane(data = data, datasourceType = selectedDs?.type.orEmpty())
+            if (isTailing || tailLines.isNotEmpty() || tailError != null) {
+                LiveTailPane(
+                    tailing = isTailing,
+                    lines = tailLines,
+                    error = tailError,
+                )
+            } else {
+                result?.let { data ->
+                    ResultsPane(data = data, datasourceType = selectedDs?.type.orEmpty())
+                }
             }
         }
     }
+}
+
+@Composable
+private fun LiveTailPane(tailing: Boolean, lines: List<TailEvent.Line>, error: String?) {
+    Card(
+        modifier = Modifier.fillMaxWidth().fillMaxSize(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.RadioButtonChecked,
+                    contentDescription = null,
+                    tint = if (tailing) Color(0xFFE74C3C) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.size(6.dp))
+                Text(
+                    if (tailing) "Live tail" else "Live tail (stopped)",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.size(8.dp))
+                Text(
+                    "${lines.size} lines",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                )
+            }
+            error?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color(0xFFE74C3C),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            // reversed=true would auto-follow, but for readability we keep chronological and
+            // let the list scroll grow. If the user needs strict follow they can scroll manually;
+            // Compose LazyColumn doesn't have a clean "stick to bottom" without a scrollState side-effect.
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth().height(400.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                reverseLayout = true,
+            ) {
+                items(lines.asReversed()) { l ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.background, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            formatTailTs(l.timestampNs),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(
+                            l.line,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatTailTs(ns: Long): String {
+    val ms = ns / 1_000_000L
+    return java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault())
+        .format(java.util.Date(ms))
 }
 
 private fun placeholderFor(type: String?): String = when (type?.lowercase()) {
