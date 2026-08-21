@@ -24,6 +24,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
+import com.fusionlancers.grafusion.ui.admin.AdminScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
@@ -139,10 +140,17 @@ private fun AppNavHost(
                 onOpenPermissions = { navController.navigate("permissions") },
                 onOpenHistory = { navController.navigate("notification_history") },
                 onOpenDatasources = { navController.navigate("datasources") },
+                onOpenAdmin = { navController.navigate("admin") },
             )
         }
         composable("datasources") {
             DatasourcesScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable("admin") {
+            AdminScreen(
                 container = container,
                 onBack = { navController.popBackStack() },
             )

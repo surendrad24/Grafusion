@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -89,6 +90,7 @@ fun AccountsScreen(
     onOpenPermissions: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenDatasources: () -> Unit = {},
+    onOpenAdmin: () -> Unit = {},
 ) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
@@ -236,6 +238,16 @@ fun AccountsScreen(
                         Icon(Icons.Filled.Storage, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Open datasource list")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenAdmin,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Grafana admin (users, teams, orgs)")
                     }
                 }
             }

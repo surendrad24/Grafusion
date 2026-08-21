@@ -75,6 +75,30 @@ interface GrafanaApi {
         @Path("uid") uid: String,
     ): retrofit2.Response<DatasourceHealth>
 
+    // ---- Admin: org users, teams, service accounts, orgs ----
+
+    @GET("api/org/users")
+    suspend fun orgUsers(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<List<OrgUser>>
+
+    @GET("api/teams/search")
+    suspend fun teams(
+        @Header("Authorization") auth: String,
+        @Query("perpage") perPage: Int = 200,
+    ): retrofit2.Response<TeamSearch>
+
+    @GET("api/serviceaccounts/search")
+    suspend fun serviceAccounts(
+        @Header("Authorization") auth: String,
+        @Query("perpage") perPage: Int = 200,
+    ): retrofit2.Response<ServiceAccountSearch>
+
+    @GET("api/orgs")
+    suspend fun orgs(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<List<GrafanaOrg>>
+
     @POST("api/annotations")
     suspend fun createAnnotation(
         @Header("Authorization") auth: String,
@@ -347,6 +371,58 @@ data class Datasource(
 data class DatasourceHealth(
     val status: String = "UNKNOWN",
     val message: String = "",
+)
+
+@Serializable
+data class OrgUser(
+    val userId: Long = 0,
+    val login: String = "",
+    val email: String = "",
+    val name: String = "",
+    val role: String = "",
+    val avatarUrl: String? = null,
+    val lastSeenAtAge: String? = null,
+    val isDisabled: Boolean = false,
+)
+
+@Serializable
+data class TeamSearch(
+    val teams: List<GrafanaTeam> = emptyList(),
+    val totalCount: Int = 0,
+)
+
+@Serializable
+data class GrafanaTeam(
+    val id: Long = 0,
+    val orgId: Long = 0,
+    val name: String = "",
+    val email: String = "",
+    val memberCount: Int = 0,
+    val avatarUrl: String? = null,
+)
+
+@Serializable
+data class ServiceAccountSearch(
+    val serviceAccounts: List<GrafanaServiceAccount> = emptyList(),
+    val totalCount: Int = 0,
+)
+
+@Serializable
+data class GrafanaServiceAccount(
+    val id: Long = 0,
+    val name: String = "",
+    val login: String = "",
+    val orgId: Long = 0,
+    val role: String = "",
+    val tokens: Int = 0,
+    val isDisabled: Boolean = false,
+    val avatarUrl: String? = null,
+)
+
+@Serializable
+data class GrafanaOrg(
+    val id: Long = 0,
+    val name: String = "",
 )
 
 @Serializable

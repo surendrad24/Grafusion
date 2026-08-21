@@ -8,6 +8,7 @@ import com.fusionlancers.grafusion.data.prefs.AppLockPreferences
 import com.fusionlancers.grafusion.data.prefs.NotificationPreferences
 import com.fusionlancers.grafusion.data.prefs.ThemePreferences
 import com.fusionlancers.grafusion.data.repo.AccountRepository
+import com.fusionlancers.grafusion.data.repo.AdminRepository
 import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
 import com.fusionlancers.grafusion.data.repo.DatasourceRepository
@@ -82,6 +83,11 @@ class AppContainer(context: Context) {
     )
 
     val datasourceRepository = DatasourceRepository(
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
+    )
+
+    val adminRepository = AdminRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
     )
