@@ -53,6 +53,15 @@ class ExploreRepository(
                     put("expr", JsonPrimitive(query))
                     put("range", JsonPrimitive(true))
                 }
+                "tempo" -> {
+                    // Tempo accepts either a trace ID lookup or a TraceQL search. We pick
+                    // "traceql" when the input looks like a TraceQL expression (starts with `{`
+                    // or contains `=`), else treat it as a trace ID.
+                    val looksLikeTraceQL = query.trimStart().startsWith("{") || "=" in query
+                    put("query", JsonPrimitive(query))
+                    put("queryType", JsonPrimitive(if (looksLikeTraceQL) "traceql" else "traceId"))
+                    if (looksLikeTraceQL) put("limit", JsonPrimitive(20))
+                }
                 else -> {
                     put("query", JsonPrimitive(query))
                     put("rawQuery", JsonPrimitive(true))
