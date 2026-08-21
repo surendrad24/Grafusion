@@ -10,6 +10,7 @@ import com.fusionlancers.grafusion.data.prefs.ThemePreferences
 import com.fusionlancers.grafusion.data.repo.AccountRepository
 import com.fusionlancers.grafusion.data.repo.AlertRepository
 import com.fusionlancers.grafusion.data.repo.DashboardRepository
+import com.fusionlancers.grafusion.data.repo.ExploreRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
@@ -57,6 +58,11 @@ class AppContainer(context: Context) {
     )
 
     val onCallRepository = OnCallRepository(
+        accountRepository = accountRepository,
+        apiFactory = apiFactory,
+    )
+
+    val exploreRepository = ExploreRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
     )

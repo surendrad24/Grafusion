@@ -61,6 +61,11 @@ interface GrafanaApi {
         @Path("id") id: Long,
     ): retrofit2.Response<Unit>
 
+    @GET("api/datasources")
+    suspend fun listDatasources(
+        @Header("Authorization") auth: String,
+    ): List<Datasource>
+
     @GET("api/alertmanager/grafana/api/v2/alerts")
     suspend fun grafanaAlerts(
         @Header("Authorization") auth: String,
@@ -223,6 +228,16 @@ data class DashboardSummary(
     @SerialName("folderUid") val folderUid: String? = null,
     val tags: List<String> = emptyList(),
     val isStarred: Boolean = false,
+)
+
+@Serializable
+data class Datasource(
+    val id: Long = 0,
+    val uid: String,
+    val name: String,
+    val type: String,
+    val url: String = "",
+    val isDefault: Boolean = false,
 )
 
 @Serializable
