@@ -1,6 +1,7 @@
 package com.fusionlancers.grafusion.data.repo
 
 import com.fusionlancers.grafusion.data.api.Datasource
+import com.fusionlancers.grafusion.data.api.DatasourceDetail
 import com.fusionlancers.grafusion.data.api.DatasourceHealth
 import com.fusionlancers.grafusion.data.api.GrafanaApiFactory
 
@@ -39,6 +40,35 @@ class DatasourceRepository(
                 }
             }.getOrElse { DatasourceHealth("ERROR", it.message.orEmpty()) }
             HealthResult(ds, health)
+        }
+    }
+
+    suspend fun detail(uid: String): Result<DatasourceDetail> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.datasourceDetail(auth, uid)
+        if (!resp.isSuccessful) {
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana user lacks datasource read permission"
+                404 -> "datasource not found"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+        resp.body() ?: error("empty response")
+    }
+
+    suspend fun probe(uid: String): Result<DatasourceHealth> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.datasourceHealth(auth, uid)
+        when {
+            resp.isSuccessful -> resp.body() ?: DatasourceHealth("UNKNOWN", "empty response")
+            resp.code() == 404 -> DatasourceHealth("UNKNOWN", "plugin has no health check")
+            resp.code() == 403 || resp.code() == 401 -> DatasourceHealth("UNKNOWN", "no permission to probe")
+            else -> DatasourceHealth("ERROR", "HTTP ${resp.code()}")
         }
     }
 }

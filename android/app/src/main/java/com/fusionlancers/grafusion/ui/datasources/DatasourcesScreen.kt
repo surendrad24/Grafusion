@@ -58,6 +58,7 @@ import kotlinx.coroutines.launch
 fun DatasourcesScreen(
     container: AppContainer,
     onBack: () -> Unit,
+    onOpenDetail: (uid: String) -> Unit = {},
 ) {
     var loading by remember { mutableStateOf(true) }
     var results by remember { mutableStateOf<List<DatasourceRepository.HealthResult>>(emptyList()) }
@@ -126,7 +127,7 @@ fun DatasourcesScreen(
                             )
                         }
                         items(results, key = { it.datasource.uid }) { row ->
-                            DatasourceRow(row)
+                            DatasourceRow(row, onClick = { onOpenDetail(row.datasource.uid) })
                         }
                     }
                 }
@@ -136,7 +137,7 @@ fun DatasourcesScreen(
 }
 
 @Composable
-private fun DatasourceRow(row: DatasourceRepository.HealthResult) {
+private fun DatasourceRow(row: DatasourceRepository.HealthResult, onClick: () -> Unit) {
     val ds = row.datasource
     val status = row.health.status.uppercase()
     val (icon, tint) = when (status) {
@@ -145,6 +146,7 @@ private fun DatasourceRow(row: DatasourceRepository.HealthResult) {
         else -> Icons.Filled.HelpOutline to Color(0xFF94A3B8)
     }
     Card(
+        onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

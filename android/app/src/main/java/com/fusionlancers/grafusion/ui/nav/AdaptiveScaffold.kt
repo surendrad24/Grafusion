@@ -32,6 +32,7 @@ import com.fusionlancers.grafusion.ui.alerts.NotificationPoliciesScreen
 import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import com.fusionlancers.grafusion.ui.datasources.DatasourceDetailScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
 import com.fusionlancers.grafusion.ui.explore.ExploreScreen
 import com.fusionlancers.grafusion.ui.history.NotificationHistoryScreen
@@ -193,6 +194,18 @@ private fun AppNavHost(
         composable("datasources") {
             DatasourcesScreen(
                 container = container,
+                onBack = { navController.popBackStack() },
+                onOpenDetail = { uid -> navController.navigate("datasource/$uid") },
+            )
+        }
+        composable(
+            route = "datasource/{uid}",
+            arguments = listOf(navArgument("uid") { type = NavType.StringType }),
+        ) { entry ->
+            val uid = entry.arguments?.getString("uid").orEmpty()
+            DatasourceDetailScreen(
+                container = container,
+                uid = uid,
                 onBack = { navController.popBackStack() },
             )
         }

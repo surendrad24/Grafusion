@@ -75,6 +75,15 @@ interface GrafanaApi {
         @Path("uid") uid: String,
     ): retrofit2.Response<DatasourceHealth>
 
+    // Full datasource including jsonData + secureJsonFields (the "which secrets are set" map,
+    // not the secret values themselves). Needed for the detail screen; the list endpoint
+    // returns a slimmed shape by design.
+    @GET("api/datasources/uid/{uid}")
+    suspend fun datasourceDetail(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+    ): retrofit2.Response<DatasourceDetail>
+
     // ---- Admin: org users, teams, service accounts, orgs ----
 
     @GET("api/org/users")
@@ -508,6 +517,25 @@ data class Datasource(
 data class DatasourceHealth(
     val status: String = "UNKNOWN",
     val message: String = "",
+)
+
+@Serializable
+data class DatasourceDetail(
+    val id: Long = 0,
+    val uid: String = "",
+    val name: String = "",
+    val type: String = "",
+    val typeName: String = "",
+    val url: String = "",
+    val access: String = "",
+    val basicAuth: Boolean = false,
+    val basicAuthUser: String = "",
+    val database: String = "",
+    val user: String = "",
+    val readOnly: Boolean = false,
+    val isDefault: Boolean = false,
+    val jsonData: kotlinx.serialization.json.JsonObject? = null,
+    val secureJsonFields: Map<String, Boolean> = emptyMap(),
 )
 
 @Serializable
