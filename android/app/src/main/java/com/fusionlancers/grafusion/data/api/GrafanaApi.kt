@@ -188,6 +188,14 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
     ): retrofit2.Response<Map<String, List<GrafanaRuleGroup>>>
 
+    // Full Alertmanager config: receivers (contact points) + route tree. Readable with Viewer
+    // + Alerting access, which is broader than /api/v1/provisioning/contact-points (that needs
+    // the provisioning role). We parse just the shapes we actually render.
+    @GET("api/alertmanager/grafana/config/api/v1/alerts")
+    suspend fun getAlertmanagerConfig(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<AlertmanagerConfigEnvelope>
+
     // ---- Grafana OnCall plugin (optional; 404 when the plugin isn't installed) ----
 
     @GET("api/plugins/grafana-oncall-app/resources/schedules/")
@@ -338,6 +346,53 @@ data class GrafanaRule(
     val `for`: String? = null,
     val labels: Map<String, String> = emptyMap(),
     val annotations: Map<String, String> = emptyMap(),
+)
+
+// ---- Alertmanager config shapes. The full config is huge and heterogeneous; we deliberately
+// only model the fields our UI reads, using JsonObject for the settings blob so integration
+// types we haven't seen yet still deserialize.
+
+@Serializable
+data class AlertmanagerConfigEnvelope(
+    @SerialName("alertmanager_config") val config: AlertmanagerConfig = AlertmanagerConfig(),
+)
+
+@Serializable
+data class AlertmanagerConfig(
+    val route: AmRoute? = null,
+    val receivers: List<AmReceiver> = emptyList(),
+    @SerialName("mute_time_intervals") val muteTimeIntervals: kotlinx.serialization.json.JsonArray? = null,
+)
+
+@Serializable
+data class AmReceiver(
+    val name: String = "",
+    @SerialName("grafana_managed_receiver_configs")
+    val grafanaConfigs: List<AmGrafanaReceiverConfig> = emptyList(),
+)
+
+@Serializable
+data class AmGrafanaReceiverConfig(
+    val uid: String? = null,
+    val name: String = "",
+    val type: String = "",
+    @SerialName("disableResolveMessage") val disableResolveMessage: Boolean = false,
+    val settings: kotlinx.serialization.json.JsonObject? = null,
+    @SerialName("secureFields") val secureFields: Map<String, Boolean> = emptyMap(),
+)
+
+@Serializable
+data class AmRoute(
+    val receiver: String? = null,
+    @SerialName("group_by") val groupBy: List<String> = emptyList(),
+    val matchers: List<String> = emptyList(),
+    @SerialName("object_matchers") val objectMatchers: List<List<String>> = emptyList(),
+    @SerialName("mute_time_intervals") val muteTimeIntervals: List<String> = emptyList(),
+    @SerialName("group_wait") val groupWait: String? = null,
+    @SerialName("group_interval") val groupInterval: String? = null,
+    @SerialName("repeat_interval") val repeatInterval: String? = null,
+    @SerialName("continue") val cont: Boolean = false,
+    val routes: List<AmRoute> = emptyList(),
 )
 
 @Serializable

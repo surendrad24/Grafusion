@@ -26,6 +26,9 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.NotificationsPaused
+import androidx.compose.material.icons.filled.AccountTree
+import androidx.compose.material.icons.filled.ContactMail
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Rule
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Schedule
@@ -42,6 +45,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
@@ -88,6 +93,8 @@ fun AlertsScreen(
     container: AppContainer,
     onOpenSilences: () -> Unit = {},
     onOpenRules: () -> Unit = {},
+    onOpenContactPoints: () -> Unit = {},
+    onOpenPolicies: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var alerts by remember { mutableStateOf<List<Alert>>(emptyList()) }
@@ -171,26 +178,44 @@ fun AlertsScreen(
                 SeverityPill("$firingCount firing", EnergyOrange)
                 Spacer(Modifier.size(6.dp))
             }
-            IconButton(onClick = onOpenRules) {
-                Icon(
-                    Icons.Filled.Rule,
-                    contentDescription = "Alert rules",
-                    tint = EnergyOrange,
-                )
-            }
-            IconButton(onClick = onOpenSilences) {
-                Icon(
-                    Icons.Filled.NotificationsPaused,
-                    contentDescription = "Silences",
-                    tint = EnergyOrange,
-                )
-            }
             IconButton(onClick = { showInsights = true }) {
                 Icon(
                     Icons.Filled.Insights,
                     contentDescription = "Alert insights",
                     tint = EnergyOrange,
                 )
+            }
+            var menuOpen by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { menuOpen = true }) {
+                    Icon(
+                        Icons.Filled.MoreVert,
+                        contentDescription = "Alert management",
+                        tint = EnergyOrange,
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Alert rules") },
+                        leadingIcon = { Icon(Icons.Filled.Rule, null) },
+                        onClick = { menuOpen = false; onOpenRules() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Silences") },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsPaused, null) },
+                        onClick = { menuOpen = false; onOpenSilences() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Contact points") },
+                        leadingIcon = { Icon(Icons.Filled.ContactMail, null) },
+                        onClick = { menuOpen = false; onOpenContactPoints() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Notification policies") },
+                        leadingIcon = { Icon(Icons.Filled.AccountTree, null) },
+                        onClick = { menuOpen = false; onOpenPolicies() },
+                    )
+                }
             }
         }
 

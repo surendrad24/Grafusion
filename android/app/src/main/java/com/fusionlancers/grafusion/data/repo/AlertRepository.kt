@@ -1,5 +1,6 @@
 package com.fusionlancers.grafusion.data.repo
 
+import com.fusionlancers.grafusion.data.api.AlertmanagerConfig
 import com.fusionlancers.grafusion.data.api.AmAlert
 import com.fusionlancers.grafusion.data.api.AmSilence
 import com.fusionlancers.grafusion.data.api.GrafanaAnnotation
@@ -195,6 +196,28 @@ class AlertRepository(
                 }
             }
         }.sortedWith(compareBy({ it.folder.lowercase() }, { it.displayName().lowercase() }))
+    }
+
+    /**
+     * Fetch the full Alertmanager config so the notification screens can render receivers
+     * (contact points) and the route tree. 404 = alertmanager disabled -> we surface an empty
+     * config instead of raising, so users on data-source-only installs see "no receivers" rather
+     * than a scary error.
+     */
+    suspend fun alertmanagerConfig(): Result<AlertmanagerConfig> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.getAlertmanagerConfig(auth)
+        if (!resp.isSuccessful) {
+            if (resp.code() == 404) return@runCatching AlertmanagerConfig()
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana user lacks alerting read permission"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+        resp.body()?.config ?: AlertmanagerConfig()
     }
 
     suspend fun fetchAlerts(): Result<List<Alert>> = runCatching {

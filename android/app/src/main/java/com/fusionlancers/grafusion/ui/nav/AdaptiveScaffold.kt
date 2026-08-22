@@ -27,6 +27,8 @@ import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.admin.AdminScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertRulesScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
+import com.fusionlancers.grafusion.ui.alerts.ContactPointsScreen
+import com.fusionlancers.grafusion.ui.alerts.NotificationPoliciesScreen
 import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
@@ -157,6 +159,8 @@ private fun AppNavHost(
                 container = container,
                 onOpenSilences = { navController.navigate("silences") },
                 onOpenRules = { navController.navigate("alert_rules") },
+                onOpenContactPoints = { navController.navigate("contact_points") },
+                onOpenPolicies = { navController.navigate("notification_policies") },
             )
         }
         composable("silences") {
@@ -164,6 +168,12 @@ private fun AppNavHost(
         }
         composable("alert_rules") {
             AlertRulesScreen(container = container, onBack = { navController.popBackStack() })
+        }
+        composable("contact_points") {
+            ContactPointsScreen(container = container, onBack = { navController.popBackStack() })
+        }
+        composable("notification_policies") {
+            NotificationPoliciesScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable(TopDest.OnCall.route) {
             OnCallScreen(container = container)
