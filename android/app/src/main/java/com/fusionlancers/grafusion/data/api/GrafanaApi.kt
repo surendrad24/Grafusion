@@ -76,6 +76,15 @@ interface GrafanaApi {
         @Path("uid") uid: String,
     ): retrofit2.Response<DatasourceHealth>
 
+    // Grafana 10+ correlations. Returns all correlations across all datasources; the API is
+    // paginated but a single 1000-row page covers any realistic self-hosted install.
+    @GET("api/datasources/correlations")
+    suspend fun listCorrelations(
+        @Header("Authorization") auth: String,
+        @Query("limit") limit: Int = 1000,
+        @Query("page") page: Int = 1,
+    ): retrofit2.Response<CorrelationsPage>
+
     // Full datasource including jsonData + secureJsonFields (the "which secrets are set" map,
     // not the secret values themselves). Needed for the detail screen; the list endpoint
     // returns a slimmed shape by design.
@@ -658,6 +667,37 @@ data class Datasource(
 data class DatasourceHealth(
     val status: String = "UNKNOWN",
     val message: String = "",
+)
+
+@Serializable
+data class CorrelationsPage(
+    val correlations: List<Correlation> = emptyList(),
+    val totalCount: Int = 0,
+    val page: Int = 1,
+    val limit: Int = 0,
+)
+
+@Serializable
+data class Correlation(
+    val uid: String = "",
+    val sourceUID: String = "",
+    val targetUID: String = "",
+    val label: String = "",
+    val description: String = "",
+    // "query" (jump into Explore with a target query) or "external" (open a URL). We render
+    // both but only "query" gets the field/target preview.
+    val type: String = "",
+    val provisioned: Boolean = false,
+    val config: CorrelationConfig? = null,
+)
+
+@Serializable
+data class CorrelationConfig(
+    val field: String = "",
+    val type: String = "",
+    // target is heterogeneous (Prom expr / Loki logQL / URL template) so we keep as JsonObject.
+    val target: kotlinx.serialization.json.JsonObject? = null,
+    val transformations: kotlinx.serialization.json.JsonArray? = null,
 )
 
 @Serializable

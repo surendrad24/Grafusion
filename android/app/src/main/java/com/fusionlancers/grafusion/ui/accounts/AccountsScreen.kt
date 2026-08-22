@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LibraryBooks
+import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Public
@@ -106,6 +107,7 @@ fun AccountsScreen(
     onOpenKiosk: () -> Unit = {},
     onOpenSnapshots: () -> Unit = {},
     onOpenPublicDashboards: () -> Unit = {},
+    onOpenCorrelations: () -> Unit = {},
 ) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
@@ -319,6 +321,16 @@ fun AccountsScreen(
                         Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Public dashboards (audit + revoke)")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenCorrelations,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Hub, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Correlations (Grafana 10+)")
                     }
                 }
             }

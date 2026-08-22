@@ -36,6 +36,7 @@ import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardVersionsScreen
 import com.fusionlancers.grafusion.ui.dashboards.PublicDashboardsScreen
 import com.fusionlancers.grafusion.ui.dashboards.SnapshotsScreen
+import com.fusionlancers.grafusion.ui.datasources.CorrelationsScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourceDetailScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
 import com.fusionlancers.grafusion.ui.explore.ExploreScreen
@@ -219,6 +220,7 @@ private fun AppNavHost(
                 onOpenKiosk = { navController.navigate("kiosk") },
                 onOpenSnapshots = { navController.navigate("snapshots") },
                 onOpenPublicDashboards = { navController.navigate("public_dashboards") },
+                onOpenCorrelations = { navController.navigate("correlations") },
             )
         }
         composable("snapshots") {
@@ -232,6 +234,12 @@ private fun AppNavHost(
                     val safeTitle = URLEncoder.encode(title, "UTF-8")
                     navController.navigate("dashboard/$uid?title=$safeTitle")
                 },
+            )
+        }
+        composable("correlations") {
+            CorrelationsScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
             )
         }
         composable("datasources") {
