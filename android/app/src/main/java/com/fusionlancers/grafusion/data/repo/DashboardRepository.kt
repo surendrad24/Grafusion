@@ -553,6 +553,77 @@ class DashboardRepository(
         if (!resp.isSuccessful) error("HTTP ${resp.code()}")
     }
 
+    /** Bundles the config with the resolved absolute share URL for one call-site. `null` config
+     *  means the dashboard has never been made public (404 from Grafana). */
+    data class PublicDashboardConfigResult(
+        val config: com.fusionlancers.grafusion.data.api.PublicDashboardConfig?,
+        val shareUrl: String?,
+    )
+
+    suspend fun getPublicDashboardConfig(dashboardUid: String): Result<PublicDashboardConfigResult> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.getPublicDashboard(auth, dashboardUid)
+        when {
+            resp.isSuccessful -> {
+                val cfg = resp.body()
+                PublicDashboardConfigResult(
+                    config = cfg,
+                    shareUrl = cfg?.accessToken?.takeIf { it.isNotBlank() }
+                        ?.let { entity.grafanaUrl.trimEnd('/') + "/public-dashboards/" + it },
+                )
+            }
+            // 404 = never made public; also hit on pre-Grafana-10 where the whole route is absent.
+            resp.code() == 404 -> PublicDashboardConfigResult(null, null)
+            else -> error("HTTP ${resp.code()}")
+        }
+    }
+
+    /**
+     * Create the public-dashboard row if it doesn't exist, or PATCH the existing one so
+     * callers don't need to branch on "does it exist yet" - the sheet can just say
+     * "save these settings" and hand off.
+     */
+    suspend fun upsertPublicDashboard(
+        dashboardUid: String,
+        isEnabled: Boolean,
+        timeSelectionEnabled: Boolean,
+        annotationsEnabled: Boolean,
+    ): Result<PublicDashboardConfigResult> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val existing = api.getPublicDashboard(auth, dashboardUid)
+        val body = com.fusionlancers.grafusion.data.api.PublicDashboardWriteBody(
+            isEnabled = isEnabled,
+            timeSelectionEnabled = timeSelectionEnabled,
+            annotationsEnabled = annotationsEnabled,
+        )
+        val resp = when {
+            existing.isSuccessful && existing.body() != null -> {
+                val cur = existing.body()!!
+                api.updatePublicDashboard(auth, dashboardUid, cur.uid, body)
+            }
+            existing.code() == 404 -> api.createPublicDashboard(auth, dashboardUid, body)
+            else -> error("HTTP ${existing.code()}")
+        }
+        if (!resp.isSuccessful) {
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana role can't manage public dashboards (Admin required)"
+                412 -> "public dashboards are disabled on this Grafana instance"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+        val cfg = resp.body()
+        PublicDashboardConfigResult(
+            config = cfg,
+            shareUrl = cfg?.accessToken?.takeIf { it.isNotBlank() }
+                ?.let { entity.grafanaUrl.trimEnd('/') + "/public-dashboards/" + it },
+        )
+    }
+
     // ---- Snapshot browsing ----
 
     data class SnapshotRow(

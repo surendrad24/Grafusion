@@ -56,6 +56,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInBrowser
+import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -80,6 +81,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -212,6 +214,7 @@ fun DashboardDetailScreen(
     var fullscreenPanel by remember { mutableStateOf<Panel?>(null) }
     var editQueriesPanel by remember { mutableStateOf<Panel?>(null) }
     var annotationSheetOpen by remember { mutableStateOf(false) }
+    var publicLinkSheetOpen by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     var offline by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
@@ -477,6 +480,14 @@ fun DashboardDetailScreen(
                                     },
                                 )
                                 DropdownMenuItem(
+                                    text = { Text("Public link") },
+                                    leadingIcon = { Icon(Icons.Filled.Public, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        publicLinkSheetOpen = true
+                                    },
+                                )
+                                DropdownMenuItem(
                                     text = { Text("Open in browser") },
                                     leadingIcon = { Icon(Icons.Filled.OpenInBrowser, contentDescription = null) },
                                     enabled = browserUrl != null,
@@ -724,6 +735,16 @@ fun DashboardDetailScreen(
                     annotationSheetOpen = false
                 }
             },
+        )
+    }
+
+    if (publicLinkSheetOpen) {
+        PublicLinkSheet(
+            container = container,
+            dashboardUid = uid,
+            dashboardTitle = title,
+            onDismiss = { publicLinkSheetOpen = false },
+            onMessage = { saveMessage = it },
         )
     }
 
@@ -3994,6 +4015,246 @@ private fun humanBits(v: Double, decimals: Int): String {
     var idx = 0
     while (kotlin.math.abs(value) >= 1000 && idx < units.size - 1) { value /= 1000; idx++ }
     return "%.${decimals}f %s".format(value, units[idx])
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun PublicLinkSheet(
+    container: AppContainer,
+    dashboardUid: String,
+    dashboardTitle: String,
+    onDismiss: () -> Unit,
+    onMessage: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+    var config by remember { mutableStateOf<com.fusionlancers.grafusion.data.api.PublicDashboardConfig?>(null) }
+    var shareUrl by remember { mutableStateOf<String?>(null) }
+    var isEnabled by remember { mutableStateOf(false) }
+    var timeSelectionEnabled by remember { mutableStateOf(false) }
+    var annotationsEnabled by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var deleteConfirmOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(dashboardUid) {
+        loading = true
+        loadError = null
+        val r = container.dashboardRepository.getPublicDashboardConfig(dashboardUid)
+        r.onSuccess { res ->
+            config = res.config
+            shareUrl = res.shareUrl
+            res.config?.let {
+                isEnabled = it.isEnabled
+                timeSelectionEnabled = it.timeSelectionEnabled
+                annotationsEnabled = it.annotationsEnabled
+            }
+        }.onFailure { loadError = it.message ?: "Failed to load" }
+        loading = false
+    }
+
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+        Column(Modifier.padding(16.dp).fillMaxWidth()) {
+            Text(
+                "Public link",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                "Publish this dashboard read-only to anyone with the URL. No Grafana login required.",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+            )
+            Spacer(Modifier.height(12.dp))
+
+            when {
+                loading -> CircularProgressIndicator(color = EnergyOrange)
+                loadError != null -> Text(
+                    loadError!!,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                else -> {
+                    ToggleRow(
+                        label = "Enabled",
+                        sub = if (isEnabled) "Link is live" else "Link is paused",
+                        checked = isEnabled,
+                        onChange = { isEnabled = it },
+                    )
+                    ToggleRow(
+                        label = "Allow time range picker",
+                        sub = "Viewers can change from/to",
+                        checked = timeSelectionEnabled,
+                        onChange = { timeSelectionEnabled = it },
+                    )
+                    ToggleRow(
+                        label = "Show annotations",
+                        sub = "Include dashboard annotations",
+                        checked = annotationsEnabled,
+                        onChange = { annotationsEnabled = it },
+                    )
+
+                    val currentShare = shareUrl
+                    if (config != null && !currentShare.isNullOrBlank()) {
+                        Spacer(Modifier.height(12.dp))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                currentShare,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                modifier = Modifier.padding(12.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    cm.setPrimaryClip(ClipData.newPlainText("Public dashboard URL", currentShare))
+                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Copy")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    val send = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "Grafana dashboard: $dashboardTitle")
+                                        putExtra(Intent.EXTRA_TEXT, currentShare)
+                                    }
+                                    context.startActivity(Intent.createChooser(send, "Share public link"))
+                                },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Filled.Share, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Share")
+                            }
+                            OutlinedButton(
+                                onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(currentShare))) },
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Icon(Icons.Filled.OpenInBrowser, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Open")
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f), enabled = !saving) {
+                            Text("Cancel")
+                        }
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    saving = true
+                                    val r = container.dashboardRepository.upsertPublicDashboard(
+                                        dashboardUid = dashboardUid,
+                                        isEnabled = isEnabled,
+                                        timeSelectionEnabled = timeSelectionEnabled,
+                                        annotationsEnabled = annotationsEnabled,
+                                    )
+                                    r.onSuccess { res ->
+                                        config = res.config
+                                        shareUrl = res.shareUrl
+                                        onMessage(if (isEnabled) "Public link saved" else "Public link paused")
+                                    }.onFailure { onMessage(it.message ?: "Save failed") }
+                                    saving = false
+                                }
+                            },
+                            enabled = !saving,
+                            colors = ButtonDefaults.buttonColors(containerColor = EnergyOrange),
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(if (saving) "Saving…" else "Save")
+                        }
+                    }
+                    if (config != null) {
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            onClick = { deleteConfirmOpen = true },
+                            enabled = !saving,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Revoke public link", color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+
+    if (deleteConfirmOpen) {
+        val cfg = config
+        AlertDialog(
+            onDismissRequest = { deleteConfirmOpen = false },
+            title = { Text("Revoke public link?") },
+            text = { Text("Anyone with the current URL will get a 404 immediately. You can re-publish later but the token will be different.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleteConfirmOpen = false
+                    if (cfg != null) {
+                        scope.launch {
+                            saving = true
+                            container.dashboardRepository
+                                .deletePublicDashboard(dashboardUid, cfg.uid)
+                                .onSuccess {
+                                    config = null
+                                    shareUrl = null
+                                    isEnabled = false
+                                    onMessage("Public link revoked")
+                                    onDismiss()
+                                }
+                                .onFailure { onMessage(it.message ?: "Revoke failed") }
+                            saving = false
+                        }
+                    }
+                }) { Text("Revoke", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmOpen = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    label: String,
+    sub: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(
+                sub,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
+    }
 }
 
 /** Format seconds as a duration Grafana-style: 32s, 5.2 min, 3.4 h, 28.6 d, 4.1 w, 1.3 y. */

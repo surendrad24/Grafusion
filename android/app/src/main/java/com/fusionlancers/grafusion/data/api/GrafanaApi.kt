@@ -6,6 +6,7 @@ import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
+import retrofit2.http.PATCH
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -183,6 +184,31 @@ interface GrafanaApi {
         @Path("dashboardUid") dashboardUid: String,
         @Path("uid") uid: String,
     ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
+    // Per-dashboard fetch. Returns 404 when the dashboard has never been made public.
+    @GET("api/dashboards/uid/{dashboardUid}/public-dashboards")
+    suspend fun getPublicDashboard(
+        @Header("Authorization") auth: String,
+        @Path("dashboardUid") dashboardUid: String,
+    ): retrofit2.Response<PublicDashboardConfig>
+
+    @POST("api/dashboards/uid/{dashboardUid}/public-dashboards")
+    suspend fun createPublicDashboard(
+        @Header("Authorization") auth: String,
+        @Path("dashboardUid") dashboardUid: String,
+        @Body body: PublicDashboardWriteBody,
+    ): retrofit2.Response<PublicDashboardConfig>
+
+    // PATCH is intentionally chosen over PUT because Grafana silently accepts a partial body
+    // and preserves omitted fields; the API docs are ambiguous but the server implementation
+    // treats absent booleans as "keep current" for PATCH only.
+    @PATCH("api/dashboards/uid/{dashboardUid}/public-dashboards/{uid}")
+    suspend fun updatePublicDashboard(
+        @Header("Authorization") auth: String,
+        @Path("dashboardUid") dashboardUid: String,
+        @Path("uid") uid: String,
+        @Body body: PublicDashboardWriteBody,
+    ): retrofit2.Response<PublicDashboardConfig>
 
     @POST("api/annotations")
     suspend fun createAnnotation(
@@ -790,6 +816,26 @@ data class PublicDashboardsPage(
     val totalCount: Int = 0,
     val page: Int = 1,
     val perPage: Int = 0,
+)
+
+@Serializable
+data class PublicDashboardConfig(
+    val uid: String = "",
+    val dashboardUid: String = "",
+    val accessToken: String = "",
+    val isEnabled: Boolean = false,
+    val timeSelectionEnabled: Boolean = false,
+    val annotationsEnabled: Boolean = false,
+    val share: String = "public",
+)
+
+/** All fields nullable so PATCH can send partial updates - Grafana preserves omitted keys. */
+@Serializable
+data class PublicDashboardWriteBody(
+    val isEnabled: Boolean? = null,
+    val timeSelectionEnabled: Boolean? = null,
+    val annotationsEnabled: Boolean? = null,
+    val share: String? = null,
 )
 
 @Serializable
