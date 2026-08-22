@@ -519,6 +519,40 @@ class DashboardRepository(
         }
     }
 
+    // ---- Public dashboards (Grafana 10+) ----
+
+    data class PublicDashboardRow(
+        val summary: com.fusionlancers.grafusion.data.api.PublicDashboardSummary,
+        /** Absolute browser URL built from the current instance's base + the access token. */
+        val shareUrl: String,
+    )
+
+    suspend fun listPublicDashboards(): Result<List<PublicDashboardRow>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.listPublicDashboards(auth)
+        val page = when {
+            resp.isSuccessful -> resp.body() ?: com.fusionlancers.grafusion.data.api.PublicDashboardsPage()
+            // Pre-10 Grafana: feature doesn't exist, so treat it as an empty list rather than
+            // erroring - the screen will render its "not enabled anywhere" empty state.
+            resp.code() == 404 -> com.fusionlancers.grafusion.data.api.PublicDashboardsPage()
+            else -> error("HTTP ${resp.code()}")
+        }
+        val base = entity.grafanaUrl.trimEnd('/')
+        page.publicDashboards
+            .sortedByDescending { it.isEnabled }
+            .map { s -> PublicDashboardRow(summary = s, shareUrl = "$base/public-dashboards/${s.accessToken}") }
+    }
+
+    suspend fun deletePublicDashboard(dashboardUid: String, publicUid: String): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.deletePublicDashboard(auth, dashboardUid, publicUid)
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+    }
+
     // ---- Snapshot browsing ----
 
     data class SnapshotRow(

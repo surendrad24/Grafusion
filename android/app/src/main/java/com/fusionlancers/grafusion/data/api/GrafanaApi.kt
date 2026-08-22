@@ -165,6 +165,25 @@ interface GrafanaApi {
         @Path("key") key: String,
     ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
 
+    // ---- Public dashboards (Grafana 10+) ----
+    // Cross-instance browse. Older Grafanas return 404 on this route; we treat that as empty.
+
+    @GET("api/dashboards/public-dashboards")
+    suspend fun listPublicDashboards(
+        @Header("Authorization") auth: String,
+        @Query("perpage") perPage: Int = 1000,
+        @Query("page") page: Int = 1,
+    ): retrofit2.Response<PublicDashboardsPage>
+
+    // Delete requires *both* the dashboard uid (URL scope) and the public-dashboard uid (target)
+    // because a dashboard can only have one public config, so the outer uid is really a namespace.
+    @DELETE("api/dashboards/uid/{dashboardUid}/public-dashboards/{uid}")
+    suspend fun deletePublicDashboard(
+        @Header("Authorization") auth: String,
+        @Path("dashboardUid") dashboardUid: String,
+        @Path("uid") uid: String,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
     @POST("api/annotations")
     suspend fun createAnnotation(
         @Header("Authorization") auth: String,
@@ -763,6 +782,28 @@ data class SnapshotResponse(
     val url: String = "",
     val deleteUrl: String = "",
     val id: Long = 0,
+)
+
+@Serializable
+data class PublicDashboardsPage(
+    val publicDashboards: List<PublicDashboardSummary> = emptyList(),
+    val totalCount: Int = 0,
+    val page: Int = 1,
+    val perPage: Int = 0,
+)
+
+@Serializable
+data class PublicDashboardSummary(
+    val uid: String = "",
+    val accessToken: String = "",
+    val dashboardUid: String = "",
+    val title: String = "",
+    val isEnabled: Boolean = false,
+    val timeSelectionEnabled: Boolean = false,
+    val annotationsEnabled: Boolean = false,
+    // Grafana's "share" mode - "public" (open web) or "email" (email-gated); older Grafanas
+    // may omit the field so we default to public.
+    val share: String = "public",
 )
 
 @Serializable

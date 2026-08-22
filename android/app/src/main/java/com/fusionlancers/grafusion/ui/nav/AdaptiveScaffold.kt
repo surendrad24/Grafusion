@@ -33,6 +33,7 @@ import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardVersionsScreen
+import com.fusionlancers.grafusion.ui.dashboards.PublicDashboardsScreen
 import com.fusionlancers.grafusion.ui.dashboards.SnapshotsScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourceDetailScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
@@ -212,10 +213,21 @@ private fun AppNavHost(
                 onOpenReports = { navController.navigate("reports") },
                 onOpenKiosk = { navController.navigate("kiosk") },
                 onOpenSnapshots = { navController.navigate("snapshots") },
+                onOpenPublicDashboards = { navController.navigate("public_dashboards") },
             )
         }
         composable("snapshots") {
             SnapshotsScreen(container = container, onBack = { navController.popBackStack() })
+        }
+        composable("public_dashboards") {
+            PublicDashboardsScreen(
+                container = container,
+                onBack = { navController.popBackStack() },
+                onOpenDashboard = { uid, title ->
+                    val safeTitle = URLEncoder.encode(title, "UTF-8")
+                    navController.navigate("dashboard/$uid?title=$safeTitle")
+                },
+            )
         }
         composable("datasources") {
             DatasourcesScreen(
