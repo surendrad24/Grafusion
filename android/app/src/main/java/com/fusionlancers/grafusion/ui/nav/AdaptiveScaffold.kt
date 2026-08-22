@@ -25,6 +25,7 @@ import androidx.navigation.navArgument
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.admin.AdminScreen
+import com.fusionlancers.grafusion.ui.alerts.AlertRulesScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
@@ -155,10 +156,14 @@ private fun AppNavHost(
             AlertsScreen(
                 container = container,
                 onOpenSilences = { navController.navigate("silences") },
+                onOpenRules = { navController.navigate("alert_rules") },
             )
         }
         composable("silences") {
             SilencesScreen(container = container, onBack = { navController.popBackStack() })
+        }
+        composable("alert_rules") {
+            AlertRulesScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable(TopDest.OnCall.route) {
             OnCallScreen(container = container)

@@ -4,6 +4,8 @@ import com.fusionlancers.grafusion.data.api.AmAlert
 import com.fusionlancers.grafusion.data.api.AmSilence
 import com.fusionlancers.grafusion.data.api.GrafanaAnnotation
 import com.fusionlancers.grafusion.data.api.GrafanaApiFactory
+import com.fusionlancers.grafusion.data.api.GrafanaRule
+import com.fusionlancers.grafusion.data.api.GrafanaRuleGroup
 import com.fusionlancers.grafusion.data.model.Alert
 import com.fusionlancers.grafusion.data.model.AlertState
 import kotlinx.serialization.json.JsonPrimitive
@@ -12,6 +14,20 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+
+/** UI-side row for the rule inspector: rule + the folder/group it lives in. */
+data class AlertRuleRow(val folder: String, val group: String, val rule: GrafanaRule) {
+    fun displayName(): String =
+        rule.grafanaAlert?.title?.takeIf { it.isNotBlank() }
+            ?: rule.alert?.takeIf { it.isNotBlank() }
+            ?: rule.record?.takeIf { it.isNotBlank() }
+            ?: "Untitled rule"
+
+    fun uid(): String = rule.grafanaAlert?.uid.orEmpty()
+
+    /** True for classic Prometheus/Loki recording rules, which have no alert condition. */
+    fun isRecording(): Boolean = rule.record != null && rule.alert == null && rule.grafanaAlert == null
+}
 
 class AlertRepository(
     private val accountRepository: AccountRepository,
@@ -147,6 +163,38 @@ class AlertRepository(
                 if (m.isEqual) matches else !matches
             }
         }
+    }
+
+    /**
+     * List all Grafana Managed alert rules the current user can see, flattened from the Ruler
+     * API's `{namespace: [groups]}` shape into one entry per rule with its folder/group already
+     * resolved. Returns an empty list when Grafana Alerting is disabled or the endpoint 404s -
+     * the inspector screen renders that as "no rules" rather than an error to avoid alarming
+     * users on plain data-source-managed installs.
+     */
+    suspend fun listAlertRules(): Result<List<AlertRuleRow>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.listGrafanaAlertRules(auth)
+        if (!resp.isSuccessful) {
+            if (resp.code() == 404) return@runCatching emptyList()
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana user lacks alert-rule read permission"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+        val body = resp.body().orEmpty()
+        buildList {
+            body.forEach { (namespace, groups) ->
+                groups.forEach { group ->
+                    group.rules.forEach { rule ->
+                        add(AlertRuleRow(folder = namespace, group = group.name, rule = rule))
+                    }
+                }
+            }
+        }.sortedWith(compareBy({ it.folder.lowercase() }, { it.displayName().lowercase() }))
     }
 
     suspend fun fetchAlerts(): Result<List<Alert>> = runCatching {

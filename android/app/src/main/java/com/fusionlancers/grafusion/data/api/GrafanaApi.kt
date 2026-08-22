@@ -181,6 +181,13 @@ interface GrafanaApi {
         @Path("id") id: String,
     ): retrofit2.Response<Unit>
 
+    // Grafana Managed alert rules (Ruler API). Response keyed by folder/namespace name,
+    // each value a list of rule groups. Read-only Viewer role is enough.
+    @GET("api/ruler/grafana/api/v1/rules")
+    suspend fun listGrafanaAlertRules(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<Map<String, List<GrafanaRuleGroup>>>
+
     // ---- Grafana OnCall plugin (optional; 404 when the plugin isn't installed) ----
 
     @GET("api/plugins/grafana-oncall-app/resources/schedules/")
@@ -309,6 +316,40 @@ data class AmMatcher(
     val value: String = "",
     val isRegex: Boolean = false,
     val isEqual: Boolean = true,
+)
+
+// ---- Grafana Managed alert rule (Ruler API) shapes. Grafana wraps its own fields under
+// grafana_alert; Prometheus / Loki data source rules use `alert` or `record` at the top level
+// so we keep both optional and let the UI degrade gracefully.
+
+@Serializable
+data class GrafanaRuleGroup(
+    val name: String = "",
+    val interval: String? = null,
+    val rules: List<GrafanaRule> = emptyList(),
+)
+
+@Serializable
+data class GrafanaRule(
+    @SerialName("grafana_alert") val grafanaAlert: GrafanaAlertDef? = null,
+    val alert: String? = null,
+    val record: String? = null,
+    val expr: String? = null,
+    val `for`: String? = null,
+    val labels: Map<String, String> = emptyMap(),
+    val annotations: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class GrafanaAlertDef(
+    val uid: String? = null,
+    val title: String = "",
+    val condition: String? = null,
+    @SerialName("no_data_state") val noDataState: String? = null,
+    @SerialName("exec_err_state") val execErrState: String? = null,
+    // The `data` field carries the full query model tree; we keep it as JsonArray so the UI
+    // can decide whether to render a preview without us having to model every datasource type.
+    val data: kotlinx.serialization.json.JsonArray? = null,
 )
 
 @Serializable

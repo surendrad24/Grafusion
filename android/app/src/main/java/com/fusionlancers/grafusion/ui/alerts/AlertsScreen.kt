@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.NotificationsPaused
+import androidx.compose.material.icons.filled.Rule
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material.icons.filled.Schedule
 import android.content.Intent
@@ -83,7 +84,11 @@ private sealed class AlertFilter {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlertsScreen(container: AppContainer, onOpenSilences: () -> Unit = {}) {
+fun AlertsScreen(
+    container: AppContainer,
+    onOpenSilences: () -> Unit = {},
+    onOpenRules: () -> Unit = {},
+) {
     val scope = rememberCoroutineScope()
     var alerts by remember { mutableStateOf<List<Alert>>(emptyList()) }
     var silences by remember { mutableStateOf<List<AmSilence>>(emptyList()) }
@@ -165,6 +170,13 @@ fun AlertsScreen(container: AppContainer, onOpenSilences: () -> Unit = {}) {
             if (firingCount > 0) {
                 SeverityPill("$firingCount firing", EnergyOrange)
                 Spacer(Modifier.size(6.dp))
+            }
+            IconButton(onClick = onOpenRules) {
+                Icon(
+                    Icons.Filled.Rule,
+                    contentDescription = "Alert rules",
+                    tint = EnergyOrange,
+                )
             }
             IconButton(onClick = onOpenSilences) {
                 Icon(
