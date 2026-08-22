@@ -95,6 +95,7 @@ fun AlertsScreen(
     onOpenRules: () -> Unit = {},
     onOpenContactPoints: () -> Unit = {},
     onOpenPolicies: () -> Unit = {},
+    onOpenMuteTimings: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var alerts by remember { mutableStateOf<List<Alert>>(emptyList()) }
@@ -214,6 +215,11 @@ fun AlertsScreen(
                         text = { Text("Notification policies") },
                         leadingIcon = { Icon(Icons.Filled.AccountTree, null) },
                         onClick = { menuOpen = false; onOpenPolicies() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Mute timings") },
+                        leadingIcon = { Icon(Icons.Filled.NotificationsOff, null) },
+                        onClick = { menuOpen = false; onOpenMuteTimings() },
                     )
                 }
             }

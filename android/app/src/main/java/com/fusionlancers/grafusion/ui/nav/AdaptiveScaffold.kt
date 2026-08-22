@@ -28,6 +28,7 @@ import com.fusionlancers.grafusion.ui.admin.AdminScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertRulesScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
 import com.fusionlancers.grafusion.ui.alerts.ContactPointsScreen
+import com.fusionlancers.grafusion.ui.alerts.MuteTimingsScreen
 import com.fusionlancers.grafusion.ui.alerts.NotificationPoliciesScreen
 import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
@@ -185,6 +186,7 @@ private fun AppNavHost(
                 onOpenRules = { navController.navigate("alert_rules") },
                 onOpenContactPoints = { navController.navigate("contact_points") },
                 onOpenPolicies = { navController.navigate("notification_policies") },
+                onOpenMuteTimings = { navController.navigate("mute_timings") },
             )
         }
         composable("silences") {
@@ -198,6 +200,9 @@ private fun AppNavHost(
         }
         composable("notification_policies") {
             NotificationPoliciesScreen(container = container, onBack = { navController.popBackStack() })
+        }
+        composable("mute_timings") {
+            MuteTimingsScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable(TopDest.OnCall.route) {
             OnCallScreen(container = container)

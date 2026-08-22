@@ -486,7 +486,32 @@ data class AlertmanagerConfigEnvelope(
 data class AlertmanagerConfig(
     val route: AmRoute? = null,
     val receivers: List<AmReceiver> = emptyList(),
-    @SerialName("mute_time_intervals") val muteTimeIntervals: kotlinx.serialization.json.JsonArray? = null,
+    @SerialName("mute_time_intervals") val muteTimeIntervals: List<AmMuteTiming> = emptyList(),
+    // Grafana 10+ moved intervals for both mute-during and active-during under this key.
+    // Same shape, but a matcher can reference either bucket; we merge on read.
+    @SerialName("time_intervals") val timeIntervals: List<AmMuteTiming> = emptyList(),
+)
+
+@Serializable
+data class AmMuteTiming(
+    val name: String = "",
+    @SerialName("time_intervals") val intervals: List<AmTimeInterval> = emptyList(),
+)
+
+@Serializable
+data class AmTimeInterval(
+    val times: List<AmTimeRange> = emptyList(),
+    val weekdays: List<String> = emptyList(),
+    @SerialName("days_of_month") val daysOfMonth: List<String> = emptyList(),
+    val months: List<String> = emptyList(),
+    val years: List<String> = emptyList(),
+    val location: String? = null,
+)
+
+@Serializable
+data class AmTimeRange(
+    @SerialName("start_time") val startTime: String = "",
+    @SerialName("end_time") val endTime: String = "",
 )
 
 @Serializable
