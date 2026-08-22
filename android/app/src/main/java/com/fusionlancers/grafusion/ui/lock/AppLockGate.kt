@@ -32,12 +32,16 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -61,6 +65,29 @@ fun AppLockGate(
 ) {
     val cfg by container.appLockPreferences.flow.collectAsState(initial = container.appLockPreferences.current())
     var unlocked by remember { mutableStateOf(false) }
+    var backgroundedAtMs by remember { mutableStateOf<Long?>(null) }
+
+    // Re-lock when the app goes to the background so a stolen unlocked phone doesn't leak
+    // credentials on resume. We give a 15-second grace so tapping into the camera / Chrome to
+    // fetch a token and coming right back doesn't force a re-auth.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> backgroundedAtMs = System.currentTimeMillis()
+                Lifecycle.Event.ON_START -> {
+                    val since = backgroundedAtMs
+                    if (unlocked && since != null && System.currentTimeMillis() - since > GRACE_MILLIS) {
+                        unlocked = false
+                    }
+                    backgroundedAtMs = null
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // If lock has never been enabled OR no PIN set, don't block.
     val locked = cfg.lockEnabled && cfg.pinSet && !unlocked
@@ -235,6 +262,8 @@ private fun launchBiometric(
         .build()
     prompt.authenticate(info)
 }
+
+private const val GRACE_MILLIS = 15_000L
 
 private tailrec fun Context.findFragmentActivity(): FragmentActivity? = when (this) {
     is FragmentActivity -> this
