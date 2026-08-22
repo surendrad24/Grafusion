@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -102,6 +103,7 @@ fun AccountsScreen(
     onOpenLibrary: () -> Unit = {},
     onOpenReports: () -> Unit = {},
     onOpenKiosk: () -> Unit = {},
+    onOpenSnapshots: () -> Unit = {},
 ) {
     val accounts by container.accountRepository.accounts.collectAsState(initial = emptyList())
     val themeMode by container.themePreferences.flow.collectAsState(initial = ThemeMode.AUTO)
@@ -295,6 +297,16 @@ fun AccountsScreen(
                         Icon(Icons.Filled.Tv, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("Kiosk / TV playlist mode")
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onOpenSnapshots,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Snapshots (share + revoke)")
                     }
                 }
             }

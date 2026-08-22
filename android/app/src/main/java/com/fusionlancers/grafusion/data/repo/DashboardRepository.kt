@@ -519,6 +519,38 @@ class DashboardRepository(
         }
     }
 
+    // ---- Snapshot browsing ----
+
+    data class SnapshotRow(
+        val summary: com.fusionlancers.grafusion.data.api.SnapshotSummary,
+        /** Absolute shareable URL. External snapshots ship their own; local ones are relative. */
+        val shareUrl: String,
+    )
+
+    suspend fun listSnapshots(): Result<List<SnapshotRow>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.listSnapshots(auth)
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+        val base = entity.grafanaUrl.trimEnd('/')
+        (resp.body() ?: emptyList())
+            .sortedByDescending { it.created ?: "" }
+            .map { s ->
+                val url = s.externalUrl?.takeIf { it.isNotBlank() }
+                    ?: "$base/dashboard/snapshot/${s.key}"
+                SnapshotRow(summary = s, shareUrl = url)
+            }
+    }
+
+    suspend fun deleteSnapshot(key: String): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.deleteSnapshot(auth, key)
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+    }
+
     // ---- Dashboard version history ----
 
     /** Newest-first list of version metadata rows. Returns an empty list on 404 so dashboards

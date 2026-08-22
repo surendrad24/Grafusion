@@ -149,6 +149,22 @@ interface GrafanaApi {
         @Body body: kotlinx.serialization.json.JsonObject,
     ): retrofit2.Response<SnapshotResponse>
 
+    // List snapshots the current user can see. Requires a signed-in session or a token with
+    // at least Viewer role. Newer Grafana returns dashboardUid so we can link back into the app;
+    // older versions only give the snapshot key + url.
+    @GET("api/dashboard/snapshots")
+    suspend fun listSnapshots(
+        @Header("Authorization") auth: String,
+    ): retrofit2.Response<List<SnapshotSummary>>
+
+    // Delete-by-key uses the primary snapshot key; the deleteKey path is for unauth'd deletions
+    // via a link, which we don't use here since we're always operating as an authed user.
+    @DELETE("api/snapshots/{key}")
+    suspend fun deleteSnapshot(
+        @Header("Authorization") auth: String,
+        @Path("key") key: String,
+    ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
     @POST("api/annotations")
     suspend fun createAnnotation(
         @Header("Authorization") auth: String,
@@ -747,6 +763,23 @@ data class SnapshotResponse(
     val url: String = "",
     val deleteUrl: String = "",
     val id: Long = 0,
+)
+
+@Serializable
+data class SnapshotSummary(
+    val id: Long = 0,
+    val name: String = "",
+    val key: String = "",
+    val orgId: Long = 0,
+    val userId: Long = 0,
+    val external: Boolean = false,
+    val externalUrl: String? = null,
+    // Epoch seconds; 0 means never. Grafana emits this as an int in the list response.
+    val expires: Long = 0,
+    val created: String? = null,
+    val updated: String? = null,
+    // Present on Grafana 10+; older versions omit it and we render the key instead.
+    val dashboardUid: String? = null,
 )
 
 @Serializable

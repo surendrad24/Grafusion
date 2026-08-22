@@ -33,6 +33,7 @@ import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardVersionsScreen
+import com.fusionlancers.grafusion.ui.dashboards.SnapshotsScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourceDetailScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
 import com.fusionlancers.grafusion.ui.explore.ExploreScreen
@@ -210,7 +211,11 @@ private fun AppNavHost(
                 onOpenLibrary = { navController.navigate("library") },
                 onOpenReports = { navController.navigate("reports") },
                 onOpenKiosk = { navController.navigate("kiosk") },
+                onOpenSnapshots = { navController.navigate("snapshots") },
             )
+        }
+        composable("snapshots") {
+            SnapshotsScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable("datasources") {
             DatasourcesScreen(
