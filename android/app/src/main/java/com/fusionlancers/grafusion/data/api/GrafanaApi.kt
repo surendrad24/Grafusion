@@ -237,7 +237,62 @@ interface GrafanaApi {
         @Header("Authorization") auth: String,
         @Path("id") id: String,
     ): retrofit2.Response<kotlinx.serialization.json.JsonObject>
+
+    // ---- Dashboard version history ----
+    // Grafana keeps a version row for every save. The list endpoint is cheap (metadata only),
+    // the detail endpoint returns the full dashboard JSON at that version, and /restore rolls
+    // the current dashboard back to a prior version (which itself creates a new version).
+
+    @GET("api/dashboards/uid/{uid}/versions")
+    suspend fun dashboardVersions(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+        @Query("limit") limit: Int = 50,
+    ): retrofit2.Response<List<DashboardVersionSummary>>
+
+    @GET("api/dashboards/uid/{uid}/versions/{version}")
+    suspend fun dashboardVersion(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+        @Path("version") version: Int,
+    ): retrofit2.Response<DashboardVersionDetail>
+
+    @POST("api/dashboards/uid/{uid}/restore")
+    suspend fun restoreDashboardVersion(
+        @Header("Authorization") auth: String,
+        @Path("uid") uid: String,
+        @Body body: RestoreDashboardBody,
+    ): retrofit2.Response<SaveDashboardResponse>
 }
+
+@Serializable
+data class DashboardVersionSummary(
+    val id: Long = 0,
+    val version: Int = 0,
+    val parentVersion: Int? = null,
+    val restoredFrom: Int? = null,
+    val created: String? = null,
+    val createdBy: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
+data class DashboardVersionDetail(
+    val id: Long = 0,
+    val version: Int = 0,
+    val parentVersion: Int? = null,
+    val restoredFrom: Int? = null,
+    val created: String? = null,
+    val createdBy: String? = null,
+    val message: String? = null,
+    // Full dashboard model at this version. Kept as JsonObject so we can peek at title / panel
+    // count / refresh without modeling every panel shape (which the DashboardRepository already
+    // does more thoroughly for the "current" dashboard).
+    val data: kotlinx.serialization.json.JsonObject? = null,
+)
+
+@Serializable
+data class RestoreDashboardBody(val version: Int)
 
 @Serializable
 data class OnCallPagedSchedules(

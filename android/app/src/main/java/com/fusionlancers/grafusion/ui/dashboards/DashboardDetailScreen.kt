@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
@@ -179,6 +180,7 @@ fun DashboardDetailScreen(
     uid: String,
     title: String,
     onBack: () -> Unit,
+    onOpenVersions: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -429,30 +431,61 @@ fun DashboardDetailScreen(
                         }) {
                             Icon(Icons.Filled.Edit, contentDescription = "Edit layout")
                         }
-                        IconButton(onClick = { annotationSheetOpen = true }) {
-                            Icon(Icons.Filled.AddComment, contentDescription = "Add annotation")
-                        }
-                        IconButton(onClick = {
-                            scope.launch {
-                                val r = container.dashboardRepository.createSnapshot(uid = uid, name = title)
-                                r.onSuccess { url ->
-                                    val send = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "Grafana snapshot: $title")
-                                        putExtra(Intent.EXTRA_TEXT, url)
-                                    }
-                                    context.startActivity(Intent.createChooser(send, "Share snapshot"))
-                                }.onFailure { err ->
-                                    snackbar.showSnackbar("Snapshot failed: ${err.message}")
-                                }
+                        var overflowOpen by remember { mutableStateOf(false) }
+                        Box {
+                            IconButton(onClick = { overflowOpen = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "More actions")
                             }
-                        }) {
-                            Icon(Icons.Filled.Share, contentDescription = "Share snapshot")
-                        }
-                        IconButton(onClick = {
-                            browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
-                        }) {
-                            Icon(Icons.Filled.OpenInBrowser, contentDescription = "Open in browser")
+                            DropdownMenu(
+                                expanded = overflowOpen,
+                                onDismissRequest = { overflowOpen = false },
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Add annotation") },
+                                    leadingIcon = { Icon(Icons.Filled.AddComment, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        annotationSheetOpen = true
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Share snapshot") },
+                                    leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        scope.launch {
+                                            val r = container.dashboardRepository.createSnapshot(uid = uid, name = title)
+                                            r.onSuccess { url ->
+                                                val send = Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, "Grafana snapshot: $title")
+                                                    putExtra(Intent.EXTRA_TEXT, url)
+                                                }
+                                                context.startActivity(Intent.createChooser(send, "Share snapshot"))
+                                            }.onFailure { err ->
+                                                snackbar.showSnackbar("Snapshot failed: ${err.message}")
+                                            }
+                                        }
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Version history") },
+                                    leadingIcon = { Icon(Icons.Filled.History, contentDescription = null) },
+                                    onClick = {
+                                        overflowOpen = false
+                                        onOpenVersions()
+                                    },
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Open in browser") },
+                                    leadingIcon = { Icon(Icons.Filled.OpenInBrowser, contentDescription = null) },
+                                    enabled = browserUrl != null,
+                                    onClick = {
+                                        overflowOpen = false
+                                        browserUrl?.let { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
+                                    },
+                                )
+                            }
                         }
                     }
                 },

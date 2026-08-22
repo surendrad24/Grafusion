@@ -518,5 +518,49 @@ class DashboardRepository(
             })
         }
     }
+
+    // ---- Dashboard version history ----
+
+    /** Newest-first list of version metadata rows. Returns an empty list on 404 so dashboards
+     *  loaded from a source that doesn't expose history (e.g. provisioned files without the
+     *  storage backend) don't error out. */
+    suspend fun listVersions(uid: String): Result<List<com.fusionlancers.grafusion.data.api.DashboardVersionSummary>> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.dashboardVersions(auth, uid)
+        when {
+            resp.isSuccessful -> (resp.body() ?: emptyList()).sortedByDescending { it.version }
+            resp.code() == 404 -> emptyList()
+            else -> error("HTTP ${resp.code()}")
+        }
+    }
+
+    /** Fetch a single version's full model - used for the compare/preview sheet. */
+    suspend fun getVersion(uid: String, version: Int): Result<com.fusionlancers.grafusion.data.api.DashboardVersionDetail> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.dashboardVersion(auth, uid, version)
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+        resp.body() ?: error("Empty version response")
+    }
+
+    /** Roll the dashboard back to a prior version. Grafana creates a new version whose
+     *  restoredFrom points at the chosen one, so subsequent list calls will surface the
+     *  restore event as its own row. */
+    suspend fun restoreVersion(uid: String, version: Int): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val resp = api.restoreDashboardVersion(
+            auth,
+            uid,
+            com.fusionlancers.grafusion.data.api.RestoreDashboardBody(version = version),
+        )
+        if (!resp.isSuccessful) error("HTTP ${resp.code()}")
+        // The next successful panelsFor() call overwrites the cached JSON, so we don't need to
+        // touch the cache here; the detail screen re-runs panelsFor on resume.
+    }
 }
 

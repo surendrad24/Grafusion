@@ -32,6 +32,7 @@ import com.fusionlancers.grafusion.ui.alerts.NotificationPoliciesScreen
 import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
+import com.fusionlancers.grafusion.ui.dashboards.DashboardVersionsScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourceDetailScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
 import com.fusionlancers.grafusion.ui.explore.ExploreScreen
@@ -149,6 +150,26 @@ private fun AppNavHost(
                 container = container,
                 uid = uid,
                 title = title.ifBlank { "Dashboard" },
+                onBack = { navController.popBackStack() },
+                onOpenVersions = {
+                    val safeTitle = URLEncoder.encode(title.ifBlank { "Dashboard" }, "UTF-8")
+                    navController.navigate("dashboard/$uid/versions?title=$safeTitle")
+                },
+            )
+        }
+        composable(
+            route = "dashboard/{uid}/versions?title={title}",
+            arguments = listOf(
+                navArgument("uid") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType; defaultValue = "" },
+            ),
+        ) { entry ->
+            val uid = entry.arguments?.getString("uid").orEmpty()
+            val title = URLDecoder.decode(entry.arguments?.getString("title").orEmpty(), "UTF-8")
+            DashboardVersionsScreen(
+                container = container,
+                uid = uid,
+                title = title,
                 onBack = { navController.popBackStack() },
             )
         }
