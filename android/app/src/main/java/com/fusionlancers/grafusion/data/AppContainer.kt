@@ -20,6 +20,7 @@ import com.fusionlancers.grafusion.data.repo.ReportsRepository
 import com.fusionlancers.grafusion.data.repo.NotificationHistoryRepository
 import com.fusionlancers.grafusion.data.repo.NotificationsRepository
 import com.fusionlancers.grafusion.data.repo.OnCallRepository
+import com.fusionlancers.grafusion.data.repo.QueryHistoryRepository
 import com.fusionlancers.grafusion.data.repo.UserPreferencesRepository
 import com.fusionlancers.grafusion.data.security.TokenVault
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -78,6 +79,10 @@ class AppContainer(context: Context) {
     val exploreRepository = ExploreRepository(
         accountRepository = accountRepository,
         apiFactory = apiFactory,
+    )
+
+    val queryHistoryRepository = QueryHistoryRepository(
+        dao = db.queryHistoryDao(),
     )
 
     val lokiTailClient = LokiTailClient(

@@ -10,8 +10,9 @@ import androidx.room.RoomDatabase
         NotificationHistoryEntity::class,
         LocalScheduleEntity::class,
         LocalShiftEntity::class,
+        QueryHistoryEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -19,4 +20,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun dashboardDao(): DashboardDao
     abstract fun notificationHistoryDao(): NotificationHistoryDao
     abstract fun localOnCallDao(): LocalOnCallDao
+    abstract fun queryHistoryDao(): QueryHistoryDao
 }

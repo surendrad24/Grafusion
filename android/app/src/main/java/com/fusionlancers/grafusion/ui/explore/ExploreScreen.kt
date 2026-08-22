@@ -21,8 +21,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Timeline
@@ -36,17 +40,22 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.data.api.Datasource
+import com.fusionlancers.grafusion.data.db.QueryHistoryEntity
 import com.fusionlancers.grafusion.data.model.PanelData
 import com.fusionlancers.grafusion.data.model.RawFrame
 import com.fusionlancers.grafusion.data.repo.TailEvent
@@ -93,6 +103,9 @@ fun ExploreScreen(container: AppContainer) {
     val tailLines = remember { mutableStateListOf<TailEvent.Line>() }
     var tailError by remember { mutableStateOf<String?>(null) }
     val isTailing = tailJob != null
+    var historyOpen by remember { mutableStateOf(false) }
+    val historySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val history by container.queryHistoryRepository.observe().collectAsState(initial = emptyList())
 
     LaunchedEffect(Unit) {
         container.exploreRepository.listDatasources()
@@ -110,6 +123,11 @@ fun ExploreScreen(container: AppContainer) {
         topBar = {
             TopAppBar(
                 title = { Text("Explore") },
+                actions = {
+                    IconButton(onClick = { historyOpen = true }) {
+                        Icon(Icons.Filled.History, contentDescription = "Query history")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.background,
                 ),
@@ -217,7 +235,14 @@ fun ExploreScreen(container: AppContainer) {
                             running = true
                             error = null
                             container.exploreRepository.runQuery(ds, query, from = timeRange, to = "now")
-                                .onSuccess { result = it; error = it.error }
+                                .onSuccess {
+                                    result = it
+                                    error = it.error
+                                    // Only persist runs that at least reached Grafana without a transport
+                                    // failure - a totally broken query still counts as one the user typed
+                                    // and might want to recall to fix.
+                                    container.queryHistoryRepository.record(ds.uid, ds.type, query)
+                                }
                                 .onFailure { error = it.message ?: "Query failed"; result = null }
                             running = false
                         }
@@ -253,6 +278,7 @@ fun ExploreScreen(container: AppContainer) {
                                 tailLines.clear()
                                 result = null
                                 tailJob = scope.launch {
+                                    container.queryHistoryRepository.record(ds.uid, ds.type, query)
                                     container.lokiTailClient.tail(ds, query).collect { ev ->
                                         when (ev) {
                                             is TailEvent.Line -> {
@@ -314,6 +340,154 @@ fun ExploreScreen(container: AppContainer) {
                 }
             }
         }
+
+        if (historyOpen) {
+            ModalBottomSheet(
+                onDismissRequest = { historyOpen = false },
+                sheetState = historySheetState,
+            ) {
+                HistorySheet(
+                    entries = history,
+                    onPick = { entry ->
+                        query = entry.query
+                        // Re-select the datasource the query was originally run against so the
+                        // recalled query targets the same type; falls back to whatever's selected
+                        // if the datasource has since been deleted.
+                        datasources.firstOrNull { it.uid == entry.datasourceUid }?.let { selectedDs = it }
+                        historyOpen = false
+                    },
+                    onToggleStar = { entry ->
+                        scope.launch { container.queryHistoryRepository.toggleStar(entry) }
+                    },
+                    onDelete = { entry ->
+                        scope.launch { container.queryHistoryRepository.delete(entry) }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistorySheet(
+    entries: List<QueryHistoryEntity>,
+    onPick: (QueryHistoryEntity) -> Unit,
+    onToggleStar: (QueryHistoryEntity) -> Unit,
+    onDelete: (QueryHistoryEntity) -> Unit,
+) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        Text(
+            "Query history",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Kept 30 days on this device. Star to pin.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        )
+        Spacer(Modifier.height(12.dp))
+        if (entries.isEmpty()) {
+            Text(
+                "No queries yet - run one and it'll show up here.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                modifier = Modifier.padding(vertical = 24.dp),
+            )
+            return@Column
+        }
+        // Starred first, then most recent. Both come pre-sorted by ranAt DESC from the DAO,
+        // so partition keeps that order within each bucket.
+        val (starred, recent) = entries.partition { it.starred }
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().height(480.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            if (starred.isNotEmpty()) {
+                item(key = "starred-header") {
+                    HistoryHeader("Starred")
+                }
+                items(starred, key = { "s-${it.id}" }) { e ->
+                    HistoryRow(entry = e, onPick = onPick, onToggleStar = onToggleStar, onDelete = onDelete)
+                }
+                item(key = "divider") { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            }
+            if (recent.isNotEmpty()) {
+                item(key = "recent-header") {
+                    HistoryHeader("Recent")
+                }
+                items(recent, key = { "r-${it.id}" }) { e ->
+                    HistoryRow(entry = e, onPick = onPick, onToggleStar = onToggleStar, onDelete = onDelete)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryHeader(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+        modifier = Modifier.padding(vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun HistoryRow(
+    entry: QueryHistoryEntity,
+    onPick: (QueryHistoryEntity) -> Unit,
+    onToggleStar: (QueryHistoryEntity) -> Unit,
+    onDelete: (QueryHistoryEntity) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+            .clickable { onPick(entry) }
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                entry.query,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 3,
+            )
+            Text(
+                "${entry.datasourceType} • ${formatRelative(entry.ranAt)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+        }
+        IconButton(onClick = { onToggleStar(entry) }) {
+            Icon(
+                if (entry.starred) Icons.Filled.Star else Icons.Filled.StarBorder,
+                contentDescription = if (entry.starred) "Unstar" else "Star",
+                tint = if (entry.starred) EnergyOrange else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+        IconButton(onClick = { onDelete(entry) }) {
+            Icon(
+                Icons.Filled.Delete,
+                contentDescription = "Delete",
+                tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            )
+        }
+    }
+}
+
+private fun formatRelative(ms: Long): String {
+    val delta = System.currentTimeMillis() - ms
+    val seconds = delta / 1000
+    return when {
+        seconds < 60 -> "${seconds}s ago"
+        seconds < 3600 -> "${seconds / 60}m ago"
+        seconds < 86_400 -> "${seconds / 3600}h ago"
+        else -> "${seconds / 86_400}d ago"
     }
 }
 
