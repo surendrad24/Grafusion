@@ -64,6 +64,50 @@ class AlertRepository(
     suspend fun acknowledge(alert: Alert, by: String): Result<Unit> =
         silence(alert, durationMinutes = 240, comment = "Acknowledged by $by (Grafusion mobile)", createdBy = by)
 
+    /**
+     * Create a silence from a raw matcher list. Used by the standalone Silences screen where the
+     * user hand-authors matchers instead of copying them off an alert. Same body shape as
+     * [silence] - just decoupled from the [Alert] type.
+     */
+    suspend fun silenceByMatchers(
+        matchers: List<Triple<String, String, Boolean>>,
+        durationMinutes: Long,
+        comment: String,
+        createdBy: String,
+    ): Result<Unit> = runCatching {
+        val entity = accountRepository.activeEntity() ?: error("No active account")
+        val auth = accountRepository.authHeaderFor(entity) ?: error("No credentials")
+        val api = apiFactory.forBaseUrl(entity.grafanaUrl)
+        val now = Instant.now()
+        val end = now.plusSeconds(durationMinutes * 60)
+        val iso = DateTimeFormatter.ISO_INSTANT
+        val body = buildJsonObject {
+            put("matchers", buildJsonArray {
+                matchers.forEach { (name, value, isRegex) ->
+                    add(buildJsonObject {
+                        put("name", JsonPrimitive(name))
+                        put("value", JsonPrimitive(value))
+                        put("isRegex", JsonPrimitive(isRegex))
+                        put("isEqual", JsonPrimitive(true))
+                    })
+                }
+            })
+            put("startsAt", JsonPrimitive(iso.format(now)))
+            put("endsAt", JsonPrimitive(iso.format(end)))
+            put("createdBy", JsonPrimitive(createdBy))
+            put("comment", JsonPrimitive(comment))
+        }
+        val resp = api.createSilence(auth, body)
+        if (!resp.isSuccessful) {
+            val hint = when (resp.code()) {
+                401, 403 -> "your Grafana user lacks alert-silence permission (Editor or Admin required)"
+                404 -> "silence endpoint not found - Grafana Alertmanager may be disabled"
+                else -> "HTTP ${resp.code()}"
+            }
+            error(hint)
+        }
+    }
+
     /** List active + pending silences so the alert sheet can show them and let the user expire one. */
     suspend fun listSilences(): Result<List<AmSilence>> = runCatching {
         val entity = accountRepository.activeEntity() ?: error("No active account")

@@ -83,7 +83,7 @@ private sealed class AlertFilter {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AlertsScreen(container: AppContainer) {
+fun AlertsScreen(container: AppContainer, onOpenSilences: () -> Unit = {}) {
     val scope = rememberCoroutineScope()
     var alerts by remember { mutableStateOf<List<Alert>>(emptyList()) }
     var silences by remember { mutableStateOf<List<AmSilence>>(emptyList()) }
@@ -165,6 +165,13 @@ fun AlertsScreen(container: AppContainer) {
             if (firingCount > 0) {
                 SeverityPill("$firingCount firing", EnergyOrange)
                 Spacer(Modifier.size(6.dp))
+            }
+            IconButton(onClick = onOpenSilences) {
+                Icon(
+                    Icons.Filled.NotificationsPaused,
+                    contentDescription = "Silences",
+                    tint = EnergyOrange,
+                )
             }
             IconButton(onClick = { showInsights = true }) {
                 Icon(

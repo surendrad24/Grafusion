@@ -26,6 +26,7 @@ import com.fusionlancers.grafusion.data.AppContainer
 import com.fusionlancers.grafusion.ui.accounts.AccountsScreen
 import com.fusionlancers.grafusion.ui.admin.AdminScreen
 import com.fusionlancers.grafusion.ui.alerts.AlertsScreen
+import com.fusionlancers.grafusion.ui.alerts.SilencesScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardDetailScreen
 import com.fusionlancers.grafusion.ui.dashboards.DashboardListScreen
 import com.fusionlancers.grafusion.ui.datasources.DatasourcesScreen
@@ -151,7 +152,13 @@ private fun AppNavHost(
             ExploreScreen(container = container)
         }
         composable(TopDest.Alerts.route) {
-            AlertsScreen(container = container)
+            AlertsScreen(
+                container = container,
+                onOpenSilences = { navController.navigate("silences") },
+            )
+        }
+        composable("silences") {
+            SilencesScreen(container = container, onBack = { navController.popBackStack() })
         }
         composable(TopDest.OnCall.route) {
             OnCallScreen(container = container)
