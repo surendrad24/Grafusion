@@ -22,6 +22,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.NotificationsPaused
@@ -39,6 +40,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
@@ -89,9 +91,13 @@ fun AlertsScreen(container: AppContainer) {
     var error by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf<AlertFilter>(AlertFilter.All) }
     var selected by remember { mutableStateOf<Alert?>(null) }
+    var showInsights by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val insightsSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val appContext = LocalContext.current.applicationContext
+    val notificationHistory by container.notificationHistoryRepository.observe()
+        .collectAsState(initial = emptyList())
 
     fun reload() {
         scope.launch {
@@ -158,6 +164,14 @@ fun AlertsScreen(container: AppContainer) {
             )
             if (firingCount > 0) {
                 SeverityPill("$firingCount firing", EnergyOrange)
+                Spacer(Modifier.size(6.dp))
+            }
+            IconButton(onClick = { showInsights = true }) {
+                Icon(
+                    Icons.Filled.Insights,
+                    contentDescription = "Alert insights",
+                    tint = EnergyOrange,
+                )
             }
         }
 
@@ -197,6 +211,15 @@ fun AlertsScreen(container: AppContainer) {
     }
 
     SnackbarHost(hostState = snackbar)
+
+    if (showInsights) {
+        ModalBottomSheet(
+            onDismissRequest = { showInsights = false },
+            sheetState = insightsSheetState,
+        ) {
+            AlertInsightsSheet(history = notificationHistory)
+        }
+    }
 
     selected?.let { alert ->
         val activeSilences = remember(alert, silences) {
