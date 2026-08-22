@@ -25,6 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Dashboard
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
@@ -79,6 +81,9 @@ fun DashboardListScreen(
     var refreshing by remember { mutableStateOf(true) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf<DashFilter>(DashFilter.All) }
+    // Folders start expanded; users can collapse a folder header to focus. Session-scoped only
+    // because persisting per-account collapsed state would be more machinery than it's worth.
+    var collapsedFolders by remember { mutableStateOf(setOf<String>()) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
@@ -258,20 +263,34 @@ fun DashboardListScreen(
                         }
                     }
                     grouped.forEach { (folder, items) ->
+                        val isCollapsed = folder in collapsedFolders
                         item(span = { GridItemSpan(maxLineSpan) }, key = "hdr-$folder") {
-                            FolderHeader(folder, items.size)
-                        }
-                        items(items, key = { it.uid }) { d ->
-                            DashboardCard(
-                                dashboard = d,
-                                onClick = { onOpenDashboard(d.uid, d.title) },
-                                onToggleStar = {
-                                    val id = d.dashboardId ?: return@DashboardCard
-                                    scope.launch {
-                                        container.dashboardRepository.toggleStar(d.uid, id, !d.isStarred)
+                            FolderHeader(
+                                name = folder,
+                                count = items.size,
+                                collapsed = isCollapsed,
+                                onToggle = {
+                                    collapsedFolders = if (isCollapsed) {
+                                        collapsedFolders - folder
+                                    } else {
+                                        collapsedFolders + folder
                                     }
                                 },
                             )
+                        }
+                        if (!isCollapsed) {
+                            items(items, key = { it.uid }) { d ->
+                                DashboardCard(
+                                    dashboard = d,
+                                    onClick = { onOpenDashboard(d.uid, d.title) },
+                                    onToggleStar = {
+                                        val id = d.dashboardId ?: return@DashboardCard
+                                        scope.launch {
+                                            container.dashboardRepository.toggleStar(d.uid, id, !d.isStarred)
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -375,30 +394,44 @@ private fun StarredTile(dashboard: Dashboard, onClick: () -> Unit) {
 }
 
 @Composable
-private fun FolderHeader(name: String, count: Int) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+private fun FolderHeader(name: String, count: Int, collapsed: Boolean, onToggle: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.background,
+        onClick = onToggle,
     ) {
-        Icon(
-            Icons.Filled.Folder,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-        )
-        Spacer(Modifier.size(6.dp))
-        Text(
-            name,
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
-        )
-        Spacer(Modifier.size(8.dp))
-        Text(
-            "$count",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Filled.Folder,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+            )
+            Spacer(Modifier.size(6.dp))
+            Text(
+                name,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.75f),
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Spacer(Modifier.size(8.dp))
+            Text(
+                "$count",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
+            )
+            Spacer(Modifier.weight(1f))
+            Icon(
+                if (collapsed) Icons.Filled.ExpandMore else Icons.Filled.ExpandLess,
+                contentDescription = if (collapsed) "Expand $name" else "Collapse $name",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+            )
+        }
     }
 }
 
